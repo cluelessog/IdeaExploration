@@ -1,0 +1,25 @@
+# IdeaGen Configuration
+# Copy to ~/.ideagen/config.toml and customize
+
+[generation]
+ideas_per_run = 10
+domain = "software"
+# target_segments = ["parents", "small_business"]
+
+[sources]
+enabled = ["hackernews", "reddit", "producthunt", "twitter"]
+scrape_delay = 2.0
+# proxy_url = "http://localhost:8080"
+
+[sources.reddit]
+subreddits = ["SaaS", "startups", "Entrepreneur", "smallbusiness"]
+
+[providers]
+default = "claude"
+# For optional providers, set API keys via environment variables:
+# OPENAI_API_KEY=sk-...
+# GEMINI_API_KEY=...
+
+[storage]
+database_path = "~/.ideagen/ideagen.db"
+output_dir = "./ideagen_output"
