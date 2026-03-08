@@ -25,7 +25,6 @@ from ideagen.core.models import (
     StageCompleted,
     StageStarted,
     TrendingItem,
-    WTPScoringCriteria,
     WTPSegment,
 )
 
@@ -161,42 +160,6 @@ class TestWTPSegment:
                 wtp_score="high",  # type: ignore[arg-type]
             )
 
-
-# ---------------------------------------------------------------------------
-# WTPScoringCriteria
-# ---------------------------------------------------------------------------
-
-
-class TestWTPScoringCriteria:
-    def test_default_weights_sum_to_one(self):
-        criteria = WTPScoringCriteria()
-        total = (
-            criteria.emotional_intensity
-            + criteria.pain_frequency
-            + criteria.price_insensitivity
-            + criteria.market_size
-            + criteria.accessibility
-            + criteria.defensibility
-        )
-        assert abs(total - 1.0) < 1e-9
-
-    def test_default_emotional_intensity(self):
-        assert WTPScoringCriteria().emotional_intensity == 0.25
-
-    def test_default_pain_frequency(self):
-        assert WTPScoringCriteria().pain_frequency == 0.20
-
-    def test_default_price_insensitivity(self):
-        assert WTPScoringCriteria().price_insensitivity == 0.20
-
-    def test_default_market_size(self):
-        assert WTPScoringCriteria().market_size == 0.15
-
-    def test_default_accessibility(self):
-        assert WTPScoringCriteria().accessibility == 0.10
-
-    def test_default_defensibility(self):
-        assert WTPScoringCriteria().defensibility == 0.10
 
 
 # ---------------------------------------------------------------------------

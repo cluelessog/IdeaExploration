@@ -31,14 +31,6 @@ class WTPSegment(BaseModel):
     wtp_score: float  # weighted composite
 
 
-class WTPScoringCriteria(BaseModel):
-    emotional_intensity: float = 0.25
-    pain_frequency: float = 0.20
-    price_insensitivity: float = 0.20
-    market_size: float = 0.15
-    accessibility: float = 0.10
-    defensibility: float = 0.10
-
 
 # ---------------------------------------------------------------------------
 # Trending / scraping primitives

@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -48,43 +49,42 @@ class HackerNewsSource(DataSource):
         return resp.json()
 
     async def collect(self, domain: Domain, limit: int = 50) -> list[TrendingItem]:
-        items: list[TrendingItem] = []
         keywords = DOMAIN_KEYWORDS.get(domain, [])
+        sem = asyncio.Semaphore(10)
 
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             story_ids = await self._fetch_story_ids(client, "topstories")
-            # Fetch more than limit to account for filtering
             fetch_count = min(limit * 3, len(story_ids))
 
-            for story_id in story_ids[:fetch_count]:
-                if len(items) >= limit:
-                    break
-                try:
-                    data = await self._fetch_item(client, story_id)
-                    if not data or not data.get("title"):
-                        continue
+            async def _fetch_one(story_id: int) -> TrendingItem | None:
+                async with sem:
+                    try:
+                        data = await self._fetch_item(client, story_id)
+                        if not data or not data.get("title"):
+                            return None
 
-                    title = data.get("title", "")
-                    url = data.get("url", f"https://news.ycombinator.com/item?id={story_id}")
+                        title = data.get("title", "")
+                        url = data.get("url", f"https://news.ycombinator.com/item?id={story_id}")
 
-                    # Filter by domain keywords if specified
-                    if keywords:
-                        title_lower = title.lower()
-                        if not any(kw in title_lower for kw in keywords):
-                            continue
+                        if keywords:
+                            title_lower = title.lower()
+                            if not any(kw in title_lower for kw in keywords):
+                                return None
 
-                    item = TrendingItem(
-                        title=title,
-                        url=url,
-                        score=data.get("score", 0),
-                        source="hackernews",
-                        timestamp=datetime.fromtimestamp(data.get("time", 0), tz=timezone.utc),
-                        comment_count=data.get("descendants", 0),
-                        metadata={"hn_id": story_id, "type": data.get("type", "story"), "by": data.get("by", "")},
-                    )
-                    items.append(item)
-                except Exception as e:
-                    logger.warning(f"Failed to fetch HN item {story_id}: {e}")
-                    continue
+                        return TrendingItem(
+                            title=title,
+                            url=url,
+                            score=data.get("score", 0),
+                            source="hackernews",
+                            timestamp=datetime.fromtimestamp(data.get("time", 0), tz=timezone.utc),
+                            comment_count=data.get("descendants", 0),
+                            metadata={"hn_id": story_id, "type": data.get("type", "story"), "by": data.get("by", "")},
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch HN item {story_id}: {e}")
+                        return None
 
-        return items
+            results = await asyncio.gather(*[_fetch_one(sid) for sid in story_ids[:fetch_count]])
+
+        items = [r for r in results if r is not None]
+        return items[:limit]
