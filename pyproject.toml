@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ideagen"
+version = "0.1.0"
+description = "Automated idea generation framework — scrape trending data, analyze with AI, generate business ideas"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [
+    { name = "IdeaGen Contributors" },
+]
+
+dependencies = [
+    "pydantic>=2.0",
+    "httpx>=0.25",
+    "aiosqlite>=0.19",
+    "beautifulsoup4>=4.12",
+    "crawl4ai>=0.3",
+    "typer>=0.9",
+    "rich>=13.0",
+    "rapidfuzz>=3.0",
+    "apscheduler>=3.10",
+    "tomli-w>=1.0",
+]
+
+[project.optional-dependencies]
+openai = ["openai>=1.0"]
+gemini = ["google-genai>=1.0"]
+all-providers = ["openai>=1.0", "google-genai>=1.0"]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "pytest-cov>=4.0",
+    "respx>=0.20",
+]
+
+[project.scripts]
+ideagen = "ideagen.cli.app:main"
+
+[tool.setuptools.packages.find]
+include = ["ideagen*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

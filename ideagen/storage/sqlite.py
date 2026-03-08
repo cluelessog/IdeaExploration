@@ -1,0 +1,140 @@
+from __future__ import annotations
+import json
+import logging
+import uuid
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+import aiosqlite
+from ideagen.core.models import RunResult, IdeaReport
+from ideagen.storage.base import StorageBackend
+from ideagen.storage.schema import CREATE_TABLES, SCHEMA_VERSION
+
+logger = logging.getLogger("ideagen")
+
+
+class SQLiteStorage(StorageBackend):
+    """SQLite-based storage backend using aiosqlite."""
+
+    def __init__(self, db_path: str = "~/.ideagen/ideagen.db"):
+        self._db_path = Path(db_path).expanduser()
+        self._initialized = False
+
+    async def _ensure_db(self) -> aiosqlite.Connection:
+        """Create database and tables if they don't exist."""
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        db = await aiosqlite.connect(str(self._db_path))
+        db.row_factory = aiosqlite.Row
+
+        if not self._initialized:
+            await db.executescript(CREATE_TABLES)
+            # Check/set schema version
+            cursor = await db.execute("SELECT version FROM schema_version LIMIT 1")
+            row = await cursor.fetchone()
+            if row is None:
+                await db.execute("INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
+            await db.commit()
+            self._initialized = True
+
+        return db
+
+    async def save_run(self, result: RunResult) -> str:
+        run_id = str(uuid.uuid4())
+        db = await self._ensure_db()
+        try:
+            await db.execute(
+                """INSERT INTO runs (id, timestamp, domain, config_snapshot, content_hash,
+                   total_items_scraped, total_after_dedup, sources_used, ideas_count)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    run_id,
+                    result.timestamp.isoformat(),
+                    result.domain.value,
+                    json.dumps(result.config_snapshot),
+                    result.content_hash,
+                    result.total_items_scraped,
+                    result.total_after_dedup,
+                    json.dumps(result.sources_used),
+                    len(result.ideas),
+                ),
+            )
+
+            for report in result.ideas:
+                idea_id = str(uuid.uuid4())
+                await db.execute(
+                    """INSERT INTO ideas (id, run_id, title, problem_statement, solution,
+                       domain, novelty_score, content_hash, report_json, wtp_score, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        idea_id,
+                        run_id,
+                        report.idea.title,
+                        report.idea.problem_statement,
+                        report.idea.solution,
+                        report.idea.domain.value,
+                        report.idea.novelty_score,
+                        report.idea.content_hash,
+                        report.model_dump_json(),
+                        report.wtp_score,
+                        report.generated_at.isoformat(),
+                    ),
+                )
+
+            await db.commit()
+            return run_id
+        finally:
+            await db.close()
+
+    async def get_runs(self, offset: int = 0, limit: int = 20, **filters: Any) -> list[dict]:
+        db = await self._ensure_db()
+        try:
+            query = "SELECT * FROM runs ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+            cursor = await db.execute(query, (limit, offset))
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            await db.close()
+
+    async def get_idea(self, idea_id: str) -> IdeaReport | None:
+        db = await self._ensure_db()
+        try:
+            cursor = await db.execute("SELECT report_json FROM ideas WHERE id = ?", (idea_id,))
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            return IdeaReport.model_validate_json(row[0])
+        finally:
+            await db.close()
+
+    async def search_ideas(self, query: str, offset: int = 0, limit: int = 50) -> list[IdeaReport]:
+        db = await self._ensure_db()
+        try:
+            cursor = await db.execute(
+                """SELECT report_json FROM ideas
+                   WHERE title LIKE ? OR problem_statement LIKE ? OR solution LIKE ?
+                   ORDER BY wtp_score DESC
+                   LIMIT ? OFFSET ?""",
+                (f"%{query}%", f"%{query}%", f"%{query}%", limit, offset),
+            )
+            rows = await cursor.fetchall()
+            return [IdeaReport.model_validate_json(row[0]) for row in rows]
+        finally:
+            await db.close()
+
+    async def delete_runs_older_than(self, days: int) -> int:
+        """Delete runs older than N days. Returns count of deleted runs."""
+        from datetime import timedelta
+        cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+        db = await self._ensure_db()
+        try:
+            # Delete ideas first (foreign key)
+            await db.execute(
+                "DELETE FROM ideas WHERE run_id IN (SELECT id FROM runs WHERE timestamp < ?)",
+                (cutoff,),
+            )
+            cursor = await db.execute("DELETE FROM runs WHERE timestamp < ?", (cutoff,))
+            count = cursor.rowcount
+            await db.commit()
+            return count
+        finally:
+            await db.close()
