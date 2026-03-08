@@ -22,7 +22,6 @@ dependencies = [
     "typer>=0.9",
     "rich>=13.0",
     "rapidfuzz>=3.0",
-    "apscheduler>=3.10",
     "tomli-w>=1.0",
 ]
 

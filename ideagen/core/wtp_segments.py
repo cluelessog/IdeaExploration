@@ -8,9 +8,7 @@ Source: .omc/research/high-wtp-segments.md
 
 from __future__ import annotations
 
-from ideagen.core.models import WTPSegment, WTPScoringCriteria
-
-DEFAULT_SCORING = WTPScoringCriteria()
+from ideagen.core.models import WTPSegment
 
 WTP_SEGMENTS: dict[str, WTPSegment] = {
     "parents": WTPSegment(
