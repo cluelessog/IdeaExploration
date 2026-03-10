@@ -275,6 +275,15 @@ class TestStorageBackendConcreteSubclass:
             ) -> list[IdeaReport]:
                 return []
 
+            async def get_run_detail(self, run_id_prefix: str) -> dict | None:
+                return None
+
+            async def save_scrape_cache(self, batch_id: str, source: str, items: list) -> None:
+                pass
+
+            async def load_latest_scrape_cache(self) -> list:
+                return []
+
         return ConcreteStorage
 
     def test_concrete_subclass_with_all_methods_instantiates(self):

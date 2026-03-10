@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 import aiosqlite
-from ideagen.core.models import RunResult, IdeaReport
+from ideagen.core.models import RunResult, IdeaReport, TrendingItem
 from ideagen.storage.base import StorageBackend
 from ideagen.storage.schema import CREATE_TABLES, SCHEMA_VERSION
 
@@ -95,6 +95,31 @@ class SQLiteStorage(StorageBackend):
         finally:
             await db.close()
 
+    async def get_run_detail(self, run_id_prefix: str) -> dict | None:
+        """Get full run details including ideas by ID prefix."""
+        db = await self._ensure_db()
+        try:
+            cursor = await db.execute(
+                "SELECT * FROM runs WHERE id LIKE ? LIMIT 1",
+                (f"{run_id_prefix}%",),
+            )
+            run_row = await cursor.fetchone()
+            if run_row is None:
+                return None
+
+            run = dict(run_row)
+            cursor = await db.execute(
+                "SELECT report_json FROM ideas WHERE run_id = ? ORDER BY wtp_score DESC",
+                (run["id"],),
+            )
+            idea_rows = await cursor.fetchall()
+            run["ideas"] = [
+                IdeaReport.model_validate_json(row[0]) for row in idea_rows
+            ]
+            return run
+        finally:
+            await db.close()
+
     async def get_idea(self, idea_id: str) -> IdeaReport | None:
         db = await self._ensure_db()
         try:
@@ -118,6 +143,45 @@ class SQLiteStorage(StorageBackend):
             )
             rows = await cursor.fetchall()
             return [IdeaReport.model_validate_json(row[0]) for row in rows]
+        finally:
+            await db.close()
+
+    async def save_scrape_cache(self, batch_id: str, source: str, items: list[TrendingItem]) -> None:
+        """Save scraped items to cache for later reuse."""
+        db = await self._ensure_db()
+        try:
+            items_json = json.dumps([item.model_dump(mode="json") for item in items])
+            await db.execute(
+                "INSERT INTO scrape_cache (id, run_id, source, items_json, scraped_at) VALUES (?, ?, ?, ?, ?)",
+                (str(uuid.uuid4()), batch_id, source, items_json, datetime.now().isoformat()),
+            )
+            await db.commit()
+        finally:
+            await db.close()
+
+    async def load_latest_scrape_cache(self) -> list[TrendingItem]:
+        """Load the most recent batch of cached scraped items."""
+        db = await self._ensure_db()
+        try:
+            cursor = await db.execute(
+                "SELECT run_id FROM scrape_cache ORDER BY scraped_at DESC LIMIT 1"
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                return []
+
+            batch_id = row[0]
+            cursor = await db.execute(
+                "SELECT items_json FROM scrape_cache WHERE run_id = ?",
+                (batch_id,),
+            )
+            rows = await cursor.fetchall()
+            items = []
+            for row in rows:
+                raw_items = json.loads(row[0])
+                for raw in raw_items:
+                    items.append(TrendingItem.model_validate(raw))
+            return items
         finally:
             await db.close()
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import uuid
 from collections.abc import AsyncIterator
 from ideagen.core.config import IdeaGenConfig
 from ideagen.core.models import (
@@ -55,20 +56,26 @@ class IdeaGenService:
         if cached and self._storage:
             yield StageStarted(stage="collect", metadata={"mode": "cached"})
             start = time.monotonic()
-            # Load from storage — for now yield empty and let storage impl handle
-            all_items: list[TrendingItem] = []
-            logger.info("Cached mode: skipping collection, loading from storage")
+            all_items = await self._storage.load_latest_scrape_cache()
+            logger.info(f"Cached mode: loaded {len(all_items)} items from cache")
             duration = int((time.monotonic() - start) * 1000)
-            yield StageCompleted(stage="collect", duration_ms=duration, metadata={"mode": "cached", "items": 0})
+            yield StageCompleted(stage="collect", duration_ms=duration, metadata={"mode": "cached", "items": len(all_items)})
         else:
             yield StageStarted(stage="collect", metadata={"sources": list(self._sources.keys())})
             start = time.monotonic()
-            all_items = await self._collect_all(domain)
+            per_source = await self._collect_all(domain)
+            all_items = [item for items in per_source.values() for item in items]
             duration = int((time.monotonic() - start) * 1000)
             yield StageCompleted(
                 stage="collect", duration_ms=duration,
                 metadata={"total_items": len(all_items)},
             )
+            # Save to cache for future --cached runs
+            if self._storage and per_source:
+                batch_id = str(uuid.uuid4())
+                for source_name, items in per_source.items():
+                    if items:
+                        await self._storage.save_scrape_cache(batch_id, source_name, items)
 
         if cancellation_token and cancellation_token.is_cancelled:
             return
@@ -178,9 +185,9 @@ class IdeaGenService:
 
         yield PipelineComplete(result=result)
 
-    async def _collect_all(self, domain: Domain) -> list[TrendingItem]:
+    async def _collect_all(self, domain: Domain) -> dict[str, list[TrendingItem]]:
         """Collect from all sources in parallel, handling failures gracefully."""
-        all_items: list[TrendingItem] = []
+        per_source: dict[str, list[TrendingItem]] = {}
 
         async def collect_one(name: str, source: DataSource) -> tuple[str, list[TrendingItem], str | None]:
             try:
@@ -197,6 +204,6 @@ class IdeaGenService:
                 logger.warning(f"Source '{name}' failed: {error}")
             else:
                 logger.info(f"Source '{name}' returned {len(items)} items")
-                all_items.extend(items)
+                per_source[name] = items
 
-        return all_items
+        return per_source
