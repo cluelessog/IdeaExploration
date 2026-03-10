@@ -1,7 +1,6 @@
 """Tests for ProductHuntSource and TwitterSource."""
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -10,6 +9,40 @@ import pytest
 from ideagen.core.models import Domain, TrendingItem
 from ideagen.sources.producthunt import ProductHuntSource
 from ideagen.sources.twitter import TwitterSource, DOMAIN_QUERIES
+
+
+# ---------------------------------------------------------------------------
+# Helper: build Atom feed XML
+# ---------------------------------------------------------------------------
+
+def _make_feed_xml(entries: list[dict]) -> str:
+    """Build minimal Atom feed XML with product entries."""
+    items_xml = ""
+    for e in entries:
+        title = e.get("title", "")
+        href = e.get("href", "https://www.producthunt.com")
+        published = e.get("published", "2026-03-08T00:00:00-08:00")
+        tagline = e.get("tagline", "")
+        post_id = e.get("post_id", "12345")
+        author = e.get("author", "Test Author")
+        content_html = f"&lt;p&gt;{tagline}&lt;/p&gt;" if tagline else ""
+        items_xml += f"""
+  <entry>
+    <id>tag:www.producthunt.com,2005:Post/{post_id}</id>
+    <published>{published}</published>
+    <updated>{published}</updated>
+    <link rel="alternate" type="text/html" href="{href}"/>
+    <title>{title}</title>
+    <content type="html">{content_html}</content>
+    <author><name>{author}</name></author>
+  </entry>"""
+
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<feed xml:lang="en-US" xmlns="http://www.w3.org/2005/Atom">
+  <id>tag:www.producthunt.com,2005:/feed</id>
+  <title>Product Hunt</title>
+  <updated>2026-03-08T00:01:00-08:00</updated>{items_xml}
+</feed>"""
 
 
 # ---------------------------------------------------------------------------
@@ -23,15 +56,7 @@ class TestProductHuntSourceAttributes:
         assert source.name == "producthunt"
 
     def test_parser_version(self):
-        assert ProductHuntSource.PARSER_VERSION == "1.0"
-
-    def test_default_scrape_delay(self):
-        source = ProductHuntSource()
-        assert source._scrape_delay == 3.0
-
-    def test_custom_scrape_delay(self):
-        source = ProductHuntSource(scrape_delay=1.0)
-        assert source._scrape_delay == 1.0
+        assert ProductHuntSource.PARSER_VERSION == "2.0"
 
     def test_default_timeout(self):
         source = ProductHuntSource()
@@ -90,203 +115,97 @@ class TestProductHuntIsAvailable:
 
 
 # ---------------------------------------------------------------------------
-# ProductHuntSource — _parse_next_data
+# ProductHuntSource — _parse_feed
 # ---------------------------------------------------------------------------
 
 
-def _make_next_data_html(posts: list[dict]) -> str:
-    """Build minimal HTML with __NEXT_DATA__ containing product posts."""
-    # Nest posts inside a typical Next.js page props shape
-    next_data = {
-        "props": {
-            "pageProps": {
-                "posts": {
-                    "edges": [{"node": p} for p in posts]
-                }
-            }
-        }
-    }
-    return f'<script id="__NEXT_DATA__" type="application/json">{json.dumps(next_data)}</script>'
-
-
-class TestProductHuntParseNextData:
+class TestProductHuntParseFeed:
     def test_parses_single_product(self):
-        post = {
-            "name": "SuperApp",
+        xml = _make_feed_xml([{
+            "title": "SuperApp",
             "tagline": "The best app ever",
-            "votesCount": 123,
-            "slug": "superapp",
-            "commentsCount": 10,
-            "createdAt": "2026-03-08T00:00:00Z",
-            "topics": {"edges": []},
-            "thumbnail": None,
-        }
-        html = _make_next_data_html([post])
+            "href": "https://www.producthunt.com/products/superapp",
+            "post_id": "100",
+            "author": "Jane Doe",
+        }])
         source = ProductHuntSource()
-        items = source._parse_next_data(html)
+        items = source._parse_feed(xml)
         assert len(items) == 1
         assert items[0].title == "SuperApp — The best app ever"
-        assert items[0].score == 123
         assert items[0].source == "producthunt"
-        assert items[0].url == "https://www.producthunt.com/posts/superapp"
+        assert items[0].url == "https://www.producthunt.com/products/superapp"
+        assert items[0].metadata["name"] == "SuperApp"
+        assert items[0].metadata["tagline"] == "The best app ever"
+        assert items[0].metadata["post_id"] == "100"
+        assert items[0].metadata["author"] == "Jane Doe"
 
     def test_title_without_tagline(self):
-        post = {
-            "name": "MinimalApp",
+        xml = _make_feed_xml([{
+            "title": "MinimalApp",
             "tagline": "",
-            "votesCount": 5,
-            "slug": "minimalapp",
-            "commentsCount": 0,
-            "createdAt": "2026-03-08T00:00:00Z",
-            "topics": {"edges": []},
-            "thumbnail": None,
-        }
-        html = _make_next_data_html([post])
+            "href": "https://www.producthunt.com/products/minimal",
+        }])
         source = ProductHuntSource()
-        items = source._parse_next_data(html)
+        items = source._parse_feed(xml)
         assert len(items) == 1
         assert items[0].title == "MinimalApp"
 
     def test_parses_multiple_products(self):
-        posts = [
-            {"name": f"App{i}", "tagline": f"Tag{i}", "votesCount": i * 10,
-             "slug": f"app{i}", "commentsCount": 0, "createdAt": "2026-03-08T00:00:00Z",
-             "topics": {"edges": []}, "thumbnail": None}
-            for i in range(3)
-        ]
-        html = _make_next_data_html(posts)
+        entries = [{"title": f"App{i}", "tagline": f"Tag{i}", "post_id": str(i)} for i in range(5)]
+        xml = _make_feed_xml(entries)
         source = ProductHuntSource()
-        items = source._parse_next_data(html)
-        assert len(items) == 3
+        items = source._parse_feed(xml)
+        assert len(items) == 5
 
-    def test_returns_empty_on_empty_html(self):
+    def test_returns_empty_on_empty_feed(self):
+        xml = _make_feed_xml([])
         source = ProductHuntSource()
-        items = source._parse_next_data("<html><body></body></html>")
+        items = source._parse_feed(xml)
         assert items == []
 
-    def test_returns_empty_on_malformed_json(self):
-        html = '<script id="__NEXT_DATA__" type="application/json">{broken json</script>'
+    def test_returns_empty_on_malformed_xml(self):
         source = ProductHuntSource()
-        items = source._parse_next_data(html)
+        items = source._parse_feed("<broken>xml<<<<")
         assert items == []
 
-    def test_skips_posts_without_name(self):
-        post = {
-            "name": "",
-            "tagline": "No name here",
-            "votesCount": 50,
-            "slug": "noname",
-            "commentsCount": 0,
-            "createdAt": "2026-03-08T00:00:00Z",
-            "topics": {"edges": []},
-            "thumbnail": None,
-        }
-        html = _make_next_data_html([post])
+    def test_skips_entries_without_title(self):
+        xml = _make_feed_xml([{"title": "", "tagline": "No title"}])
         source = ProductHuntSource()
-        items = source._parse_next_data(html)
+        items = source._parse_feed(xml)
         assert items == []
 
     def test_timestamp_parsed_correctly(self):
-        post = {
-            "name": "App",
-            "tagline": "Tag",
-            "votesCount": 1,
-            "slug": "app",
-            "commentsCount": 0,
-            "createdAt": "2026-03-08T12:34:56Z",
-            "topics": {"edges": []},
-            "thumbnail": None,
-        }
-        html = _make_next_data_html([post])
+        xml = _make_feed_xml([{
+            "title": "App",
+            "published": "2026-03-08T12:34:56-08:00",
+        }])
         source = ProductHuntSource()
-        items = source._parse_next_data(html)
+        items = source._parse_feed(xml)
         assert len(items) == 1
         assert items[0].timestamp.year == 2026
         assert items[0].timestamp.month == 3
         assert items[0].timestamp.day == 8
 
-    def test_comment_count_stored(self):
-        post = {
-            "name": "App",
-            "tagline": "Tag",
-            "votesCount": 10,
-            "slug": "app",
-            "commentsCount": 42,
-            "createdAt": "2026-03-08T00:00:00Z",
-            "topics": {"edges": []},
-            "thumbnail": None,
-        }
-        html = _make_next_data_html([post])
+    def test_score_is_zero_from_feed(self):
+        xml = _make_feed_xml([{"title": "App"}])
         source = ProductHuntSource()
-        items = source._parse_next_data(html)
-        assert items[0].comment_count == 42
-
-    def test_metadata_contains_name_and_tagline(self):
-        post = {
-            "name": "MyProduct",
-            "tagline": "Does stuff",
-            "votesCount": 7,
-            "slug": "myproduct",
-            "commentsCount": 3,
-            "createdAt": "2026-03-08T00:00:00Z",
-            "topics": {"edges": []},
-            "thumbnail": None,
-        }
-        html = _make_next_data_html([post])
-        source = ProductHuntSource()
-        items = source._parse_next_data(html)
-        assert items[0].metadata["name"] == "MyProduct"
-        assert items[0].metadata["tagline"] == "Does stuff"
+        items = source._parse_feed(xml)
+        assert items[0].score == 0
 
 
 # ---------------------------------------------------------------------------
-# ProductHuntSource — _parse_html_cards fallback
-# ---------------------------------------------------------------------------
-
-
-class TestProductHuntParseHtmlCards:
-    def test_returns_empty_on_empty_html(self):
-        source = ProductHuntSource()
-        items = source._parse_html_cards("<html><body></body></html>")
-        assert items == []
-
-    def test_returns_empty_on_blank_string(self):
-        source = ProductHuntSource()
-        items = source._parse_html_cards("")
-        assert items == []
-
-    def test_parses_anchor_with_posts_href(self):
-        html = '<html><body><a href="/posts/cool-app">Cool App — Does things</a></body></html>'
-        source = ProductHuntSource()
-        items = source._parse_html_cards(html)
-        assert len(items) == 1
-        assert "cool-app" in items[0].url
-        assert items[0].source == "producthunt"
-
-
-# ---------------------------------------------------------------------------
-# ProductHuntSource — collect integration (mocked network)
+# ProductHuntSource — collect (mocked network)
 # ---------------------------------------------------------------------------
 
 
 class TestProductHuntCollect:
     @pytest.mark.asyncio
     async def test_collect_returns_list(self):
-        post = {
-            "name": "TestProduct",
-            "tagline": "Does something",
-            "votesCount": 99,
-            "slug": "testproduct",
-            "commentsCount": 5,
-            "createdAt": "2026-03-08T00:00:00Z",
-            "topics": {"edges": []},
-            "thumbnail": None,
-        }
-        html_content = _make_next_data_html([post])
+        xml = _make_feed_xml([{"title": "TestProduct", "tagline": "Does something"}])
 
         mock_resp = MagicMock()
         mock_resp.status_code = 200
-        mock_resp.text = html_content
+        mock_resp.text = xml
         mock_resp.raise_for_status = MagicMock()
 
         mock_client = AsyncMock()
@@ -294,8 +213,7 @@ class TestProductHuntCollect:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("ideagen.sources.producthunt.httpx.AsyncClient", return_value=mock_client), \
-             patch("ideagen.sources.producthunt.asyncio.sleep", new_callable=AsyncMock):
+        with patch("ideagen.sources.producthunt.httpx.AsyncClient", return_value=mock_client):
             source = ProductHuntSource()
             items = await source.collect(Domain.SOFTWARE_SAAS, limit=10)
 
@@ -305,17 +223,12 @@ class TestProductHuntCollect:
 
     @pytest.mark.asyncio
     async def test_collect_respects_limit(self):
-        posts = [
-            {"name": f"App{i}", "tagline": f"Tag{i}", "votesCount": i,
-             "slug": f"app{i}", "commentsCount": 0, "createdAt": "2026-03-08T00:00:00Z",
-             "topics": {"edges": []}, "thumbnail": None}
-            for i in range(20)
-        ]
-        html_content = _make_next_data_html(posts)
+        entries = [{"title": f"App{i}", "tagline": f"Tag{i}"} for i in range(20)]
+        xml = _make_feed_xml(entries)
 
         mock_resp = MagicMock()
         mock_resp.status_code = 200
-        mock_resp.text = html_content
+        mock_resp.text = xml
         mock_resp.raise_for_status = MagicMock()
 
         mock_client = AsyncMock()
@@ -323,8 +236,7 @@ class TestProductHuntCollect:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("ideagen.sources.producthunt.httpx.AsyncClient", return_value=mock_client), \
-             patch("ideagen.sources.producthunt.asyncio.sleep", new_callable=AsyncMock):
+        with patch("ideagen.sources.producthunt.httpx.AsyncClient", return_value=mock_client):
             source = ProductHuntSource()
             items = await source.collect(Domain.SOFTWARE_SAAS, limit=5)
 
@@ -344,10 +256,12 @@ class TestProductHuntCollect:
         assert items == []
 
     @pytest.mark.asyncio
-    async def test_collect_returns_empty_on_empty_page(self):
+    async def test_collect_returns_empty_on_empty_feed(self):
+        xml = _make_feed_xml([])
+
         mock_resp = MagicMock()
         mock_resp.status_code = 200
-        mock_resp.text = "<html><body>No products here</body></html>"
+        mock_resp.text = xml
         mock_resp.raise_for_status = MagicMock()
 
         mock_client = AsyncMock()
@@ -355,8 +269,7 @@ class TestProductHuntCollect:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("ideagen.sources.producthunt.httpx.AsyncClient", return_value=mock_client), \
-             patch("ideagen.sources.producthunt.asyncio.sleep", new_callable=AsyncMock):
+        with patch("ideagen.sources.producthunt.httpx.AsyncClient", return_value=mock_client):
             source = ProductHuntSource()
             items = await source.collect(Domain.SOFTWARE_SAAS)
 
@@ -364,10 +277,11 @@ class TestProductHuntCollect:
 
     @pytest.mark.asyncio
     async def test_collect_all_domains(self):
-        """collect() should work for all three domain values."""
+        xml = _make_feed_xml([{"title": "App"}])
+
         mock_resp = MagicMock()
         mock_resp.status_code = 200
-        mock_resp.text = "<html><body></body></html>"
+        mock_resp.text = xml
         mock_resp.raise_for_status = MagicMock()
 
         mock_client = AsyncMock()
@@ -375,8 +289,7 @@ class TestProductHuntCollect:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("ideagen.sources.producthunt.httpx.AsyncClient", return_value=mock_client), \
-             patch("ideagen.sources.producthunt.asyncio.sleep", new_callable=AsyncMock):
+        with patch("ideagen.sources.producthunt.httpx.AsyncClient", return_value=mock_client):
             source = ProductHuntSource()
             for domain in Domain:
                 items = await source.collect(domain)
@@ -394,7 +307,7 @@ class TestTwitterSourceAttributes:
         assert source.name == "twitter"
 
     def test_parser_version(self):
-        assert TwitterSource.PARSER_VERSION == "1.0"
+        assert TwitterSource.PARSER_VERSION == "1.1"
 
     def test_default_scrape_delay(self):
         source = TwitterSource()
@@ -468,7 +381,7 @@ class TestTwitterIsAvailable:
 
 
 # ---------------------------------------------------------------------------
-# TwitterSource — collect returns list when libraries unavailable
+# TwitterSource — collect
 # ---------------------------------------------------------------------------
 
 
