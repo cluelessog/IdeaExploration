@@ -17,7 +17,7 @@ DOMAIN_QUERIES: dict[Domain, list[str]] = {
 
 
 class TwitterSource(DataSource):
-    PARSER_VERSION = "1.0"
+    PARSER_VERSION = "1.1"
 
     def __init__(self, scrape_delay: float = 3.0, timeout: float = 15.0):
         self._scrape_delay = scrape_delay
@@ -28,7 +28,12 @@ class TwitterSource(DataSource):
         return "twitter"
 
     async def is_available(self) -> bool:
-        """Check if snscrape or ntscraper is importable."""
+        """Check if snscrape or ntscraper is importable and functional.
+
+        Note: Twitter/X has progressively blocked unauthenticated scraping.
+        snscrape may return 404s and ntscraper depends on working Nitter instances.
+        This source is best-effort and may return empty results.
+        """
         try:
             import snscrape.modules.twitter  # noqa: F401
             return True
@@ -47,7 +52,10 @@ class TwitterSource(DataSource):
         if not items:
             items = await self._try_ntscraper(domain, limit)
         if not items:
-            logger.warning("Twitter: both snscrape and ntscraper unavailable or returned no results")
+            logger.warning(
+                "Twitter: no results. Twitter/X has blocked most unauthenticated scraping. "
+                "This source is best-effort and may be unavailable."
+            )
         return items
 
     async def _try_snscrape(self, domain: Domain, limit: int) -> list[TrendingItem]:
