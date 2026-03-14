@@ -39,6 +39,8 @@ from ideagen.cli.commands.config_cmd import config_app
 from ideagen.cli.commands.history import history_app
 from ideagen.cli.commands.interactive import interactive_app
 from ideagen.cli.commands.schedule import schedule_app
+from ideagen.cli.commands.compare import compare_app
+from ideagen.cli.commands.prompts import prompts_app
 
 app.add_typer(run_app, name="run")
 app.add_typer(sources_app, name="sources")
@@ -46,6 +48,8 @@ app.add_typer(config_app, name="config")
 app.add_typer(history_app, name="history")
 app.add_typer(interactive_app, name="interactive")
 app.add_typer(schedule_app, name="schedule")
+app.add_typer(compare_app, name="compare")
+app.add_typer(prompts_app, name="prompts")
 
 
 def main() -> None:

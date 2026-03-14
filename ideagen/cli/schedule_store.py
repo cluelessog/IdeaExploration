@@ -1,6 +1,7 @@
 """Schedule persistence via TOML file + cron job management."""
 from __future__ import annotations
 
+import logging
 import subprocess
 import sys
 import uuid
@@ -8,6 +9,8 @@ from datetime import datetime
 from pathlib import Path
 
 import tomli_w
+
+logger = logging.getLogger("ideagen")
 
 SCHEDULE_FILE = Path("~/.ideagen/schedules.toml")
 
@@ -80,10 +83,25 @@ def _find_ideagen_bin() -> str:
     return path or "ideagen"
 
 
+def is_wsl() -> bool:
+    """Detect if running under Windows Subsystem for Linux."""
+    try:
+        with open("/proc/version", "r") as f:
+            return "microsoft" in f.read().lower()
+    except (FileNotFoundError, PermissionError):
+        return False
+
+
 def install_cron(schedule: dict) -> bool:
     """Install a cron job for the schedule. Returns True on success."""
     if sys.platform == "win32":
         return False
+
+    if is_wsl():
+        logger.warning(
+            "WSL detected. crontab may not persist across reboots. "
+            "Consider using Windows Task Scheduler (schtasks) or systemd timers instead."
+        )
 
     tag = f"# ideagen-{schedule['id']}"
     cron_expr = _build_cron_expression(schedule["frequency"], schedule["time"])

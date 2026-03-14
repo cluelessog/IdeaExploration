@@ -204,3 +204,145 @@ def test_config_show_redacts_api_keys(runner: CliRunner) -> None:
     assert result.exit_code == 0
     assert "REDACTED" in result.output
     assert "sk-secret" not in result.output
+
+
+# ---------------------------------------------------------------------------
+# 8. --format option (Phase 11.1)
+# ---------------------------------------------------------------------------
+
+def _make_mock_pipeline_patches(run_result):
+    """Return a context-manager list for mocking the pipeline."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+    # We need to patch _consume_pipeline indirectly by making service.run yield PipelineComplete
+    from ideagen.core.models import PipelineComplete
+
+    async def fake_run(**kwargs):
+        yield PipelineComplete(result=run_result)
+
+    mock_service = MagicMock()
+    mock_service.run = fake_run
+    return mock_service
+
+
+def test_run_format_json_outputs_valid_json(runner: CliRunner) -> None:
+    """ideagen run --format json prints valid JSON for the RunResult."""
+    import json
+    from ideagen.core.models import PipelineComplete
+    from tests.conftest import make_run
+
+    run_result = make_run()
+
+    async def fake_run(**kwargs):
+        yield PipelineComplete(result=run_result)
+
+    mock_service = MagicMock()
+    mock_service.run = fake_run
+
+    with (
+        patch("ideagen.sources.registry.get_sources_by_names", return_value={}),
+        patch("ideagen.providers.registry.get_provider", return_value=MagicMock()),
+        patch("ideagen.storage.sqlite.SQLiteStorage", return_value=MagicMock()),
+        patch("ideagen.core.service.IdeaGenService", return_value=mock_service),
+    ):
+        result = runner.invoke(app, ["run", "--format", "json"])
+
+    assert result.exit_code == 0, result.output
+    parsed = json.loads(result.output)
+    assert isinstance(parsed, dict)
+    assert "ideas" in parsed
+
+
+def test_run_format_markdown_outputs_markdown(runner: CliRunner) -> None:
+    """ideagen run --format markdown prints markdown with expected headers."""
+    from ideagen.core.models import PipelineComplete
+    from tests.conftest import make_run
+
+    run_result = make_run(title="Great Idea")
+
+    async def fake_run(**kwargs):
+        yield PipelineComplete(result=run_result)
+
+    mock_service = MagicMock()
+    mock_service.run = fake_run
+
+    with (
+        patch("ideagen.sources.registry.get_sources_by_names", return_value={}),
+        patch("ideagen.providers.registry.get_provider", return_value=MagicMock()),
+        patch("ideagen.storage.sqlite.SQLiteStorage", return_value=MagicMock()),
+        patch("ideagen.core.service.IdeaGenService", return_value=mock_service),
+    ):
+        result = runner.invoke(app, ["run", "--format", "markdown"])
+
+    assert result.exit_code == 0, result.output
+    assert "# IdeaGen Run Report" in result.output
+    assert "## Ideas" in result.output
+    assert "Great Idea" in result.output
+
+
+def test_run_format_rich_is_default(runner: CliRunner) -> None:
+    """ideagen run without --format uses rich renderer (existing behavior)."""
+    from ideagen.core.models import RunResult
+
+    mock_run_result = MagicMock(spec=RunResult)
+    mock_run_result.ideas = []
+
+    mock_renderer = MagicMock()
+    mock_renderer.render = AsyncMock(return_value=mock_run_result)
+
+    with (
+        patch("ideagen.sources.registry.get_sources_by_names", return_value={}),
+        patch("ideagen.providers.registry.get_provider", return_value=MagicMock()),
+        patch("ideagen.storage.sqlite.SQLiteStorage", return_value=MagicMock()),
+        patch("ideagen.core.service.IdeaGenService", return_value=MagicMock()),
+        patch("ideagen.cli.formatters.PipelineEventRenderer", return_value=mock_renderer),
+    ):
+        result = runner.invoke(app, ["run"])
+
+    assert result.exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# 9. --source filter (Phase 11.2)
+# ---------------------------------------------------------------------------
+
+def test_run_source_filter_single(runner: CliRunner) -> None:
+    """ideagen run --source hackernews calls get_sources_by_names with ['hackernews']."""
+    from ideagen.core.models import RunResult
+
+    mock_run_result = MagicMock(spec=RunResult)
+    mock_run_result.ideas = []
+
+    mock_renderer = MagicMock()
+    mock_renderer.render = AsyncMock(return_value=mock_run_result)
+
+    captured_names = []
+
+    def mock_get_sources(names, **kwargs):
+        captured_names.extend(names)
+        return {"hackernews": MagicMock()}
+
+    with (
+        patch("ideagen.sources.registry.get_sources_by_names", side_effect=mock_get_sources),
+        patch("ideagen.providers.registry.get_provider", return_value=MagicMock()),
+        patch("ideagen.storage.sqlite.SQLiteStorage", return_value=MagicMock()),
+        patch("ideagen.core.service.IdeaGenService", return_value=MagicMock()),
+        patch("ideagen.cli.formatters.PipelineEventRenderer", return_value=mock_renderer),
+    ):
+        result = runner.invoke(app, ["run", "--source", "hackernews"])
+
+    assert result.exit_code == 0
+    assert captured_names == ["hackernews"]
+
+
+def test_run_source_filter_unknown_all_exits_error(runner: CliRunner) -> None:
+    """ideagen run --source bogus exits with code 1 when all sources are unknown."""
+    with (
+        patch("ideagen.sources.registry.get_sources_by_names", return_value={}),
+        patch("ideagen.sources.registry.get_available_source_names", return_value=["hackernews", "reddit", "producthunt", "twitter"]),
+        patch("ideagen.providers.registry.get_provider", return_value=MagicMock()),
+        patch("ideagen.storage.sqlite.SQLiteStorage", return_value=MagicMock()),
+        patch("ideagen.core.service.IdeaGenService", return_value=MagicMock()),
+    ):
+        result = runner.invoke(app, ["run", "--source", "bogus"])
+
+    assert result.exit_code == 1

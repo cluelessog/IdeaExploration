@@ -8,7 +8,7 @@ from ideagen.core.config import IdeaGenConfig
 from ideagen.core.models import (
     CancellationToken, Domain, PipelineEvent, PipelineComplete,
     StageStarted, StageCompleted, SourceFailed, IdeaGenerated,
-    TrendingItem, RunResult,
+    TrendingItem, RunResult, DuplicateRunWarning, CacheEmptyWarning,
 )
 from ideagen.core.pipeline import AnalysisPipeline
 from ideagen.core.dedup import deduplicate, run_content_hash
@@ -57,7 +57,11 @@ class IdeaGenService:
             yield StageStarted(stage="collect", metadata={"mode": "cached"})
             start = time.monotonic()
             all_items = await self._storage.load_latest_scrape_cache()
-            logger.info(f"Cached mode: loaded {len(all_items)} items from cache")
+            if not all_items:
+                logger.warning("No cached data found. Run without --cached first.")
+                yield CacheEmptyWarning()
+            else:
+                logger.info(f"Cached mode: loaded {len(all_items)} items from cache")
             duration = int((time.monotonic() - start) * 1000)
             yield StageCompleted(stage="collect", duration_ms=duration, metadata={"mode": "cached", "items": len(all_items)})
         else:
@@ -179,9 +183,18 @@ class IdeaGenService:
         if self._storage:
             yield StageStarted(stage="store")
             start = time.monotonic()
-            await self._storage.save_run(result)
+            run_id = await self._storage.save_run(result)
             duration = int((time.monotonic() - start) * 1000)
             yield StageCompleted(stage="store", duration_ms=duration)
+
+            # Check for duplicate runs by content hash
+            existing = await self._storage.find_runs_by_content_hash(
+                result.content_hash, exclude_id=run_id
+            )
+            if existing:
+                yield DuplicateRunWarning(
+                    existing_run_ids=[r["id"] for r in existing]
+                )
 
         yield PipelineComplete(result=result)
 

@@ -114,6 +114,12 @@ class MockStorage(StorageBackend):
     async def load_latest_scrape_cache(self) -> list:
         return []
 
+    async def find_runs_by_content_hash(self, content_hash: str, exclude_id: str | None = None) -> list[dict]:
+        return []
+
+    async def find_runs_by_prefix(self, prefix: str) -> list[dict]:
+        return []
+
 
 # ---------------------------------------------------------------------------
 # Fixture helpers
@@ -590,3 +596,108 @@ class TestConfigOptions:
 
         complete = next(e for e in events if isinstance(e, PipelineComplete))
         assert complete.result.domain == Domain.BROAD_BUSINESS
+
+
+# ---------------------------------------------------------------------------
+# Duplicate run detection (Phase 10.1)
+# ---------------------------------------------------------------------------
+
+class TestDuplicateRunDetection:
+    async def test_duplicate_run_emits_warning_event(self):
+        """When storage finds existing runs with same content hash, DuplicateRunWarning is emitted."""
+        from ideagen.core.models import DuplicateRunWarning
+
+        source = MockSource("hackernews", [_trending_item()])
+        provider = MockProvider()
+        _queue_full_pipeline(provider)
+
+        storage = MockStorage()
+        # Override find_runs_by_content_hash to return a fake existing run
+        async def _find_dup(content_hash, exclude_id=None):
+            return [{"id": "existing-run-123", "timestamp": "2024-01-01"}]
+        storage.find_runs_by_content_hash = _find_dup
+
+        service = IdeaGenService(
+            sources={"hackernews": source}, provider=provider, storage=storage,
+        )
+        events = await _collect_events(service)
+
+        dup_events = [e for e in events if isinstance(e, DuplicateRunWarning)]
+        assert len(dup_events) == 1
+        assert "existing-run-123" in dup_events[0].existing_run_ids
+
+    async def test_unique_run_no_warning(self):
+        """No DuplicateRunWarning when content hash is unique."""
+        from ideagen.core.models import DuplicateRunWarning
+
+        source = MockSource("hackernews", [_trending_item()])
+        provider = MockProvider()
+        _queue_full_pipeline(provider)
+        storage = MockStorage()
+
+        service = IdeaGenService(
+            sources={"hackernews": source}, provider=provider, storage=storage,
+        )
+        events = await _collect_events(service)
+
+        dup_events = [e for e in events if isinstance(e, DuplicateRunWarning)]
+        assert len(dup_events) == 0
+
+
+# ---------------------------------------------------------------------------
+# Cached empty warning (Phase 10.2)
+# ---------------------------------------------------------------------------
+
+class TestCachedEmptyWarning:
+    async def test_cached_empty_emits_warning_event(self):
+        """CacheEmptyWarning emitted when --cached has empty cache."""
+        from ideagen.core.models import CacheEmptyWarning
+
+        source = MockSource("hackernews", [_trending_item()])
+        provider = MockProvider()
+        storage = MockStorage()
+        # load_latest_scrape_cache already returns [] by default
+
+        service = IdeaGenService(
+            sources={"hackernews": source}, provider=provider, storage=storage,
+        )
+        events = await _collect_events(service, cached=True)
+
+        cache_events = [e for e in events if isinstance(e, CacheEmptyWarning)]
+        assert len(cache_events) == 1
+
+    async def test_cached_with_data_no_warning(self):
+        """No CacheEmptyWarning when cache has data."""
+        from ideagen.core.models import CacheEmptyWarning
+
+        source = MockSource("hackernews", [_trending_item()])
+        provider = MockProvider()
+        _queue_full_pipeline(provider)
+        storage = MockStorage()
+
+        # Override to return cached items
+        async def _load_cache():
+            return [_trending_item("Cached Item")]
+        storage.load_latest_scrape_cache = _load_cache
+
+        service = IdeaGenService(
+            sources={"hackernews": source}, provider=provider, storage=storage,
+        )
+        events = await _collect_events(service, cached=True)
+
+        cache_events = [e for e in events if isinstance(e, CacheEmptyWarning)]
+        assert len(cache_events) == 0
+
+    async def test_cached_empty_still_completes_pipeline(self):
+        """Pipeline still completes even when cache is empty."""
+        source = MockSource("hackernews", [_trending_item()])
+        provider = MockProvider()
+        storage = MockStorage()
+
+        service = IdeaGenService(
+            sources={"hackernews": source}, provider=provider, storage=storage,
+        )
+        events = await _collect_events(service, cached=True)
+
+        complete_events = [e for e in events if isinstance(e, PipelineComplete)]
+        assert len(complete_events) == 1
