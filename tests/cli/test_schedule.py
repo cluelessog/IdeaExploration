@@ -1,14 +1,24 @@
 """Tests for ideagen schedule commands."""
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from typer.testing import CliRunner
 
 from ideagen.cli.app import app
-from ideagen.cli.schedule_store import load_schedules, save_schedule, remove_schedule
+from ideagen.cli.schedule_store import (
+    _build_cron_expression,
+    _find_ideagen_bin,
+    install_cron,
+    load_schedules,
+    remove_schedule,
+    save_schedule,
+    uninstall_cron,
+)
 
 
 @pytest.fixture
@@ -126,3 +136,148 @@ def test_cron_install_called(tmp_path: Path) -> None:
     # First call should be crontab -l, second should be crontab -
     calls = mock_run.call_args_list
     assert any("crontab" in str(c) for c in calls)
+    # Verify the cron line written includes the ideagen command and schedule tag
+    write_call = calls[-1]
+    written_input = write_call.kwargs.get("input", "") or ""
+    assert "ideagen" in written_input
+    assert "ideagen-test1234" in written_input
+
+
+# ---------------------------------------------------------------------------
+# _build_cron_expression tests
+# ---------------------------------------------------------------------------
+
+def test_build_cron_expression_daily() -> None:
+    """Daily frequency produces correct cron expression."""
+    assert _build_cron_expression("daily", "09:30") == "30 09 * * *"
+
+
+def test_build_cron_expression_weekly() -> None:
+    """Weekly frequency produces Monday cron expression."""
+    assert _build_cron_expression("weekly", "14:00") == "00 14 * * 1"
+
+
+def test_build_cron_expression_unknown_defaults_daily() -> None:
+    """Unknown frequency defaults to daily cron expression."""
+    assert _build_cron_expression("monthly", "08:00") == "00 08 * * *"
+
+
+# ---------------------------------------------------------------------------
+# _find_ideagen_bin tests
+# ---------------------------------------------------------------------------
+
+def test_find_ideagen_bin_found() -> None:
+    """Returns the path when shutil.which finds ideagen."""
+    with patch("shutil.which", return_value="/usr/local/bin/ideagen"):
+        result = _find_ideagen_bin()
+    assert result == "/usr/local/bin/ideagen"
+
+
+def test_find_ideagen_bin_not_found() -> None:
+    """Falls back to 'ideagen' when shutil.which returns None."""
+    with patch("shutil.which", return_value=None):
+        result = _find_ideagen_bin()
+    assert result == "ideagen"
+
+
+# ---------------------------------------------------------------------------
+# install_cron tests
+# ---------------------------------------------------------------------------
+
+def test_install_cron_windows_returns_false() -> None:
+    """install_cron returns False on Windows without calling subprocess."""
+    schedule = {"id": "abc12345", "frequency": "daily", "time": "09:00", "domain": "software"}
+    with patch("ideagen.cli.schedule_store.sys") as mock_sys:
+        mock_sys.platform = "win32"
+        result = install_cron(schedule)
+    assert result is False
+
+
+def test_install_cron_crontab_fails_returns_false() -> None:
+    """install_cron returns False when subprocess raises CalledProcessError."""
+    schedule = {"id": "abc12345", "frequency": "daily", "time": "09:00", "domain": "software"}
+    with patch("ideagen.cli.schedule_store.sys") as mock_sys, \
+         patch("ideagen.cli.schedule_store.subprocess.run") as mock_run:
+        mock_sys.platform = "linux"
+        mock_run.side_effect = subprocess.CalledProcessError(1, "crontab")
+        result = install_cron(schedule)
+    assert result is False
+
+
+def test_install_cron_no_existing_crontab() -> None:
+    """install_cron returns True when crontab -l returns non-zero (no existing crontab)."""
+    schedule = {"id": "new12345", "frequency": "daily", "time": "10:00", "domain": "software"}
+
+    list_result = MagicMock()
+    list_result.returncode = 1
+    list_result.stdout = ""
+
+    write_result = MagicMock()
+    write_result.returncode = 0
+
+    with patch("ideagen.cli.schedule_store.sys") as mock_sys, \
+         patch("ideagen.cli.schedule_store.subprocess.run") as mock_run:
+        mock_sys.platform = "linux"
+        mock_run.side_effect = [list_result, write_result]
+        result = install_cron(schedule)
+
+    assert result is True
+
+
+# ---------------------------------------------------------------------------
+# uninstall_cron tests
+# ---------------------------------------------------------------------------
+
+def test_uninstall_cron_success() -> None:
+    """uninstall_cron returns True when the schedule tag is present in crontab."""
+    existing_crontab = "0 9 * * * ideagen run --domain software # ideagen-test1234\n"
+
+    list_result = MagicMock()
+    list_result.returncode = 0
+    list_result.stdout = existing_crontab
+
+    write_result = MagicMock()
+    write_result.returncode = 0
+
+    with patch("ideagen.cli.schedule_store.sys") as mock_sys, \
+         patch("ideagen.cli.schedule_store.subprocess.run") as mock_run:
+        mock_sys.platform = "linux"
+        mock_run.side_effect = [list_result, write_result]
+        result = uninstall_cron("test1234")
+
+    assert result is True
+
+
+def test_uninstall_cron_not_found() -> None:
+    """uninstall_cron returns False when no matching schedule tag exists."""
+    existing_crontab = "0 9 * * * ideagen run --domain software # ideagen-other999\n"
+
+    list_result = MagicMock()
+    list_result.returncode = 0
+    list_result.stdout = existing_crontab
+
+    with patch("ideagen.cli.schedule_store.sys") as mock_sys, \
+         patch("ideagen.cli.schedule_store.subprocess.run") as mock_run:
+        mock_sys.platform = "linux"
+        mock_run.return_value = list_result
+        result = uninstall_cron("test1234")
+
+    assert result is False
+
+
+def test_uninstall_cron_windows_returns_false() -> None:
+    """uninstall_cron returns False on Windows."""
+    with patch("ideagen.cli.schedule_store.sys") as mock_sys:
+        mock_sys.platform = "win32"
+        result = uninstall_cron("anyid")
+    assert result is False
+
+
+def test_uninstall_cron_crontab_error() -> None:
+    """uninstall_cron returns False when crontab -l raises an error."""
+    with patch("ideagen.cli.schedule_store.sys") as mock_sys, \
+         patch("ideagen.cli.schedule_store.subprocess.run") as mock_run:
+        mock_sys.platform = "linux"
+        mock_run.side_effect = subprocess.CalledProcessError(1, "crontab")
+        result = uninstall_cron("anyid")
+    assert result is False
