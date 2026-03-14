@@ -274,3 +274,97 @@ async def test_delete_runs_older_than_none_deleted(storage: SQLiteStorage) -> No
     await storage.save_run(_make_run())
     deleted = await storage.delete_runs_older_than(days=365)
     assert deleted == 0
+
+
+# ---------------------------------------------------------------------------
+# find_runs_by_content_hash tests (Phase 10.1)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_find_runs_by_content_hash_finds_match(storage: SQLiteStorage) -> None:
+    """find_runs_by_content_hash returns runs with matching hash."""
+    run1 = _make_run("Idea A")
+    run1.content_hash = "duplicate_hash"
+    await storage.save_run(run1)
+
+    run2 = _make_run("Idea B")
+    run2.content_hash = "duplicate_hash"
+    await storage.save_run(run2)
+
+    matches = await storage.find_runs_by_content_hash("duplicate_hash")
+    assert len(matches) == 2
+
+
+@pytest.mark.asyncio
+async def test_find_runs_by_content_hash_excludes_self(storage: SQLiteStorage) -> None:
+    """find_runs_by_content_hash with exclude_id omits the specified run."""
+    run = _make_run("Idea A")
+    run.content_hash = "my_hash"
+    run_id = await storage.save_run(run)
+
+    matches = await storage.find_runs_by_content_hash("my_hash", exclude_id=run_id)
+    assert len(matches) == 0
+
+
+@pytest.mark.asyncio
+async def test_find_runs_by_content_hash_no_match(storage: SQLiteStorage) -> None:
+    """find_runs_by_content_hash returns empty list for unique hash."""
+    run = _make_run("Idea A")
+    run.content_hash = "unique_hash"
+    await storage.save_run(run)
+
+    matches = await storage.find_runs_by_content_hash("nonexistent_hash")
+    assert matches == []
+
+
+# ---------------------------------------------------------------------------
+# find_runs_by_prefix tests (Phase 10.3)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_find_runs_by_prefix_single_match(storage: SQLiteStorage) -> None:
+    """find_runs_by_prefix returns a single matching run."""
+    run_id = await storage.save_run(_make_run("Idea A"))
+    matches = await storage.find_runs_by_prefix(run_id[:8])
+    assert len(matches) == 1
+    assert matches[0]["id"] == run_id
+
+
+@pytest.mark.asyncio
+async def test_find_runs_by_prefix_multiple_matches(storage: SQLiteStorage) -> None:
+    """find_runs_by_prefix returns all matching runs ordered by timestamp DESC."""
+    import aiosqlite
+
+    # Insert two runs with known IDs sharing a prefix
+    run1 = _make_run("Old Idea")
+    run1_ts = datetime(2024, 1, 1).isoformat()
+    run2 = _make_run("New Idea")
+    run2_ts = datetime(2024, 6, 1).isoformat()
+
+    db = await storage._ensure_db()
+    try:
+        await db.execute(
+            "INSERT INTO runs (id, timestamp, domain, sources_used, ideas_count, total_items_scraped, total_after_dedup, content_hash, config_snapshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("aaa-old-run", run1_ts, "SOFTWARE_SAAS", "hackernews", 1, 42, 30, "h1", "{}"),
+        )
+        await db.execute(
+            "INSERT INTO runs (id, timestamp, domain, sources_used, ideas_count, total_items_scraped, total_after_dedup, content_hash, config_snapshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("aaa-new-run", run2_ts, "SOFTWARE_SAAS", "hackernews", 1, 42, 30, "h2", "{}"),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    matches = await storage.find_runs_by_prefix("aaa")
+    assert len(matches) == 2
+    # Most recent first
+    assert matches[0]["id"] == "aaa-new-run"
+    assert matches[1]["id"] == "aaa-old-run"
+
+
+@pytest.mark.asyncio
+async def test_find_runs_by_prefix_no_match(storage: SQLiteStorage) -> None:
+    """find_runs_by_prefix returns empty list for non-matching prefix."""
+    await storage.save_run(_make_run("Idea A"))
+    matches = await storage.find_runs_by_prefix("zzz-nonexistent")
+    assert matches == []

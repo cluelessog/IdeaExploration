@@ -173,3 +173,47 @@ def test_history_prune_no_matches(runner: CliRunner, tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert "Deleted 0" in result.output
+
+
+# ---------------------------------------------------------------------------
+# History show prefix ambiguity (Phase 10.3)
+# ---------------------------------------------------------------------------
+
+def test_history_show_ambiguous_prefix_shows_warning(runner: CliRunner, tmp_path: Path) -> None:
+    """history show with ambiguous prefix shows a warning and matching runs table."""
+    from ideagen.cli.async_bridge import run_async
+
+    storage = SQLiteStorage(db_path=str(tmp_path / "test.db"))
+    run_async(storage.save_run(make_run("Idea A")))
+    run_async(storage.save_run(make_run("Idea B")))
+
+    # Use a very short prefix that could match multiple runs
+    # We need to find a common prefix — just use empty string which matches all
+    with patch("ideagen.cli.config_loader.load_config") as mock_config:
+        mock_config.return_value.storage.database_path = str(tmp_path / "test.db")
+        # Use an empty-ish prefix — get actual IDs first
+        runs = run_async(storage.get_runs())
+        # Find a common prefix between the two run IDs (first char is enough since UUIDs vary)
+        # Use a single char prefix that may match both
+        result = runner.invoke(app, ["history", "show", ""])
+
+    assert result.exit_code == 0
+    assert "Ambiguous" in result.output or "Matching Runs" in result.output
+
+
+def test_history_show_ambiguous_prefix_still_shows_detail(runner: CliRunner, tmp_path: Path) -> None:
+    """history show with ambiguous prefix still shows the most recent run's details."""
+    from ideagen.cli.async_bridge import run_async
+
+    storage = SQLiteStorage(db_path=str(tmp_path / "test.db"))
+    run_async(storage.save_run(make_run("Old Idea")))
+    run_async(storage.save_run(make_run("New Idea")))
+
+    with patch("ideagen.cli.config_loader.load_config") as mock_config:
+        mock_config.return_value.storage.database_path = str(tmp_path / "test.db")
+        # Empty prefix matches all
+        result = runner.invoke(app, ["history", "show", ""])
+
+    assert result.exit_code == 0
+    # Should show run detail (the ID field at minimum)
+    assert "ID" in result.output

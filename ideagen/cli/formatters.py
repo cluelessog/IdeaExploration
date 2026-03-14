@@ -8,6 +8,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from ideagen.core.models import (
     PipelineEvent, StageStarted, StageCompleted, SourceFailed,
     IdeaGenerated, PipelineComplete, IdeaReport, RunResult,
+    DuplicateRunWarning, CacheEmptyWarning,
 )
 
 console = Console()
@@ -52,6 +53,13 @@ class PipelineEventRenderer:
                 elif isinstance(event, IdeaGenerated):
                     self._console.print(f"  [blue]Idea {event.index + 1}/{event.total}:[/blue] {event.idea.title}")
 
+                elif isinstance(event, DuplicateRunWarning):
+                    ids = ", ".join(event.existing_run_ids[:3])
+                    self._console.print(f"  [yellow]WARNING[/yellow] Similar run already exists (run IDs: {ids})")
+
+                elif isinstance(event, CacheEmptyWarning):
+                    self._console.print("  [yellow]WARNING[/yellow] No cached data found. Run without --cached first.")
+
                 elif isinstance(event, PipelineComplete):
                     result = event.result
 
@@ -81,6 +89,27 @@ def format_idea_card(report: IdeaReport) -> Panel:
     subtitle = f"Segments: {segments}" if segments else None
 
     return Panel(content, title=report.idea.title, subtitle=subtitle, border_style="blue")
+
+
+def format_run_as_markdown(result: RunResult) -> str:
+    """Format a RunResult as a markdown string."""
+    lines: list[str] = []
+    lines.append("# IdeaGen Run Report")
+    lines.append(f"**Date:** {result.timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append(f"**Domain:** {result.domain.value}")
+    lines.append(f"**Sources:** {', '.join(result.sources_used)}")
+    lines.append("")
+    lines.append("## Ideas")
+    lines.append("")
+    for i, report in enumerate(result.ideas, start=1):
+        lines.append(f"### {i}. {report.idea.title}")
+        lines.append(f"**Problem:** {report.idea.problem_statement}")
+        lines.append(f"**Solution:** {report.idea.solution}")
+        lines.append(f"**WTP Score:** {report.wtp_score:.1f}/5.0")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+    return "\n".join(lines)
 
 
 def format_run_summary(result: RunResult) -> Table:

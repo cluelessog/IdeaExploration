@@ -25,3 +25,9 @@ class StorageBackend(ABC):
 
     @abstractmethod
     async def load_latest_scrape_cache(self) -> list: ...
+
+    @abstractmethod
+    async def find_runs_by_content_hash(self, content_hash: str, exclude_id: str | None = None) -> list[dict]: ...
+
+    @abstractmethod
+    async def find_runs_by_prefix(self, prefix: str) -> list[dict]: ...

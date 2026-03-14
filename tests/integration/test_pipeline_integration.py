@@ -131,6 +131,12 @@ class MockStorage(StorageBackend):
     async def load_latest_scrape_cache(self) -> list:
         return []
 
+    async def find_runs_by_content_hash(self, content_hash: str, exclude_id: str | None = None) -> list[dict]:
+        return []
+
+    async def find_runs_by_prefix(self, prefix: str) -> list[dict]:
+        return []
+
 
 # ---------------------------------------------------------------------------
 # Builder helpers

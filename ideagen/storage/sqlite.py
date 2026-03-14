@@ -146,6 +146,38 @@ class SQLiteStorage(StorageBackend):
         finally:
             await db.close()
 
+    async def find_runs_by_content_hash(self, content_hash: str, exclude_id: str | None = None) -> list[dict]:
+        """Find runs with the same content hash, optionally excluding one."""
+        db = await self._ensure_db()
+        try:
+            if exclude_id:
+                cursor = await db.execute(
+                    "SELECT id, timestamp FROM runs WHERE content_hash = ? AND id != ? ORDER BY timestamp DESC LIMIT 5",
+                    (content_hash, exclude_id),
+                )
+            else:
+                cursor = await db.execute(
+                    "SELECT id, timestamp FROM runs WHERE content_hash = ? ORDER BY timestamp DESC LIMIT 5",
+                    (content_hash,),
+                )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            await db.close()
+
+    async def find_runs_by_prefix(self, prefix: str) -> list[dict]:
+        """Find all runs matching an ID prefix, ordered by most recent first."""
+        db = await self._ensure_db()
+        try:
+            cursor = await db.execute(
+                "SELECT id, timestamp, domain FROM runs WHERE id LIKE ? ORDER BY timestamp DESC",
+                (f"{prefix}%",),
+            )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            await db.close()
+
     async def save_scrape_cache(self, batch_id: str, source: str, items: list[TrendingItem]) -> None:
         """Save scraped items to cache for later reuse."""
         db = await self._ensure_db()

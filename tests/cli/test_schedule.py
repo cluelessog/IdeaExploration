@@ -4,7 +4,7 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
 from typer.testing import CliRunner
@@ -281,3 +281,75 @@ def test_uninstall_cron_crontab_error() -> None:
         mock_run.side_effect = subprocess.CalledProcessError(1, "crontab")
         result = uninstall_cron("anyid")
     assert result is False
+
+
+# ---------------------------------------------------------------------------
+# WSL detection tests (Phase 10.4)
+# ---------------------------------------------------------------------------
+
+from ideagen.cli.schedule_store import is_wsl
+
+
+def test_is_wsl_detects_wsl_proc_version() -> None:
+    """is_wsl returns True when /proc/version contains 'microsoft'."""
+    mock_content = "Linux version 5.15.0-1-microsoft-standard-WSL2"
+    with patch("builtins.open", mock_open(read_data=mock_content)):
+        assert is_wsl() is True
+
+
+def test_is_wsl_false_on_native_linux() -> None:
+    """is_wsl returns False on native Linux."""
+    mock_content = "Linux version 6.1.0-generic (buildd@lcy02)"
+    with patch("builtins.open", mock_open(read_data=mock_content)):
+        assert is_wsl() is False
+
+
+def test_is_wsl_false_when_file_missing() -> None:
+    """is_wsl returns False when /proc/version doesn't exist."""
+    with patch("builtins.open", side_effect=FileNotFoundError):
+        assert is_wsl() is False
+
+
+def test_install_cron_wsl_logs_warning() -> None:
+    """install_cron logs a WSL warning when WSL is detected."""
+    schedule = {"id": "wsl12345", "frequency": "daily", "time": "09:00", "domain": "software"}
+
+    list_result = MagicMock()
+    list_result.returncode = 0
+    list_result.stdout = ""
+    write_result = MagicMock()
+    write_result.returncode = 0
+
+    with patch("ideagen.cli.schedule_store.is_wsl", return_value=True), \
+         patch("ideagen.cli.schedule_store.sys") as mock_sys, \
+         patch("ideagen.cli.schedule_store.subprocess.run") as mock_run, \
+         patch("ideagen.cli.schedule_store.logger") as mock_logger:
+        mock_sys.platform = "linux"
+        mock_run.side_effect = [list_result, write_result]
+        install_cron(schedule)
+
+    mock_logger.warning.assert_called_once()
+    warning_msg = mock_logger.warning.call_args[0][0]
+    assert "WSL" in warning_msg
+    assert "schtasks" in warning_msg or "systemd" in warning_msg
+
+
+def test_install_cron_wsl_still_attempts_cron() -> None:
+    """install_cron still attempts cron installation on WSL (doesn't bail out)."""
+    schedule = {"id": "wsl12345", "frequency": "daily", "time": "09:00", "domain": "software"}
+
+    list_result = MagicMock()
+    list_result.returncode = 0
+    list_result.stdout = ""
+    write_result = MagicMock()
+    write_result.returncode = 0
+
+    with patch("ideagen.cli.schedule_store.is_wsl", return_value=True), \
+         patch("ideagen.cli.schedule_store.sys") as mock_sys, \
+         patch("ideagen.cli.schedule_store.subprocess.run") as mock_run:
+        mock_sys.platform = "linux"
+        mock_run.side_effect = [list_result, write_result]
+        result = install_cron(schedule)
+
+    assert result is True
+    assert mock_run.call_count == 2  # crontab -l and crontab -

@@ -230,3 +230,44 @@ def test_renderer_stage_completed_without_stage_started():
     # Must not raise despite current_task being None
     result = asyncio.run(renderer.render(events))
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# DuplicateRunWarning + CacheEmptyWarning renderer tests (Phase 10.1 + 10.2)
+# ---------------------------------------------------------------------------
+
+def test_renderer_displays_duplicate_run_warning():
+    """Renderer prints a warning when DuplicateRunWarning event arrives."""
+    from ideagen.core.models import DuplicateRunWarning
+
+    con, buf = _capture_console()
+    renderer = PipelineEventRenderer(console=con)
+
+    events = _event_stream(
+        DuplicateRunWarning(existing_run_ids=["abc-123", "def-456"]),
+        PipelineComplete(result=make_run()),
+    )
+    asyncio.run(renderer.render(events))
+
+    output = buf.getvalue()
+    assert "WARNING" in output
+    assert "Similar run already exists" in output
+    assert "abc-123" in output
+
+
+def test_renderer_displays_cache_empty_warning():
+    """Renderer prints a warning when CacheEmptyWarning event arrives."""
+    from ideagen.core.models import CacheEmptyWarning
+
+    con, buf = _capture_console()
+    renderer = PipelineEventRenderer(console=con)
+
+    events = _event_stream(
+        CacheEmptyWarning(),
+        PipelineComplete(result=make_run()),
+    )
+    asyncio.run(renderer.render(events))
+
+    output = buf.getvalue()
+    assert "WARNING" in output
+    assert "No cached data found" in output

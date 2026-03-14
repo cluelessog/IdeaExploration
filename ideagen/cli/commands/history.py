@@ -62,7 +62,24 @@ def show_run(
     config = load_config(config_path)
     storage = SQLiteStorage(db_path=config.storage.database_path)
 
-    detail = run_async(storage.get_run_detail(run_id))
+    # Check for prefix ambiguity
+    matches = run_async(storage.find_runs_by_prefix(run_id))
+    if not matches:
+        console.print(f"[red]No run found matching '{run_id}'[/red]")
+        raise typer.Exit(code=1)
+
+    if len(matches) > 1:
+        console.print(f"[yellow]Ambiguous prefix '{run_id}' matches {len(matches)} runs. Showing most recent. Use a longer prefix to be specific.[/yellow]")
+        match_table = Table(title="Matching Runs")
+        match_table.add_column("ID", style="dim", max_width=12)
+        match_table.add_column("Timestamp", style="cyan")
+        match_table.add_column("Domain", style="green")
+        for m in matches[:5]:
+            match_table.add_row(m["id"][:12], str(m.get("timestamp", ""))[:19], m.get("domain", ""))
+        console.print(match_table)
+
+    # Use the most recent match (first in list, ordered by timestamp DESC)
+    detail = run_async(storage.get_run_detail(matches[0]["id"]))
 
     if detail is None:
         console.print(f"[red]No run found matching '{run_id}'[/red]")

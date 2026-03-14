@@ -175,6 +175,15 @@ class PipelineComplete(PipelineEvent):
     event_type: str = "pipeline_complete"
 
 
+class DuplicateRunWarning(PipelineEvent):
+    existing_run_ids: list[str]
+    event_type: str = "duplicate_run_warning"
+
+
+class CacheEmptyWarning(PipelineEvent):
+    event_type: str = "cache_empty_warning"
+
+
 # ---------------------------------------------------------------------------
 # Cancellation token (plain class, not Pydantic)
 # ---------------------------------------------------------------------------
