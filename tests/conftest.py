@@ -110,3 +110,14 @@ def tmp_storage(tmp_path: Path) -> SQLiteStorage:
 def runner() -> CliRunner:
     """Shared Typer CLI test runner."""
     return CliRunner()
+
+
+# ---------------------------------------------------------------------------
+# Async helpers
+# ---------------------------------------------------------------------------
+
+
+async def _event_stream(*events):
+    """Yield pipeline events as an async iterator (for testing PipelineEventRenderer)."""
+    for event in events:
+        yield event

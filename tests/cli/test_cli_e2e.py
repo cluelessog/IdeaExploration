@@ -175,3 +175,32 @@ def test_config_init_creates_toml_file(runner: CliRunner, tmp_path: Path) -> Non
     with open(config_file, "rb") as f:
         data = tomllib.load(f)
     assert isinstance(data, dict)
+
+
+# ---------------------------------------------------------------------------
+# 7. config show — displays config as JSON and redacts API keys
+# ---------------------------------------------------------------------------
+
+def test_config_show_displays_json(runner: CliRunner) -> None:
+    """ideagen config show exits 0 and includes provider name in output."""
+    from ideagen.core.config import IdeaGenConfig
+
+    with patch("ideagen.cli.config_loader.load_config", return_value=IdeaGenConfig()):
+        result = runner.invoke(app, ["config", "show"])
+
+    assert result.exit_code == 0
+    assert "claude" in result.output
+
+
+def test_config_show_redacts_api_keys(runner: CliRunner) -> None:
+    """ideagen config show replaces openai_api_key with REDACTED."""
+    from ideagen.core.config import IdeaGenConfig, ProviderConfig
+
+    config = IdeaGenConfig(providers=ProviderConfig(openai_api_key="sk-secret"))
+
+    with patch("ideagen.cli.config_loader.load_config", return_value=config):
+        result = runner.invoke(app, ["config", "show"])
+
+    assert result.exit_code == 0
+    assert "REDACTED" in result.output
+    assert "sk-secret" not in result.output
