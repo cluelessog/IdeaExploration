@@ -7,6 +7,9 @@ class SourceUnavailableError(IdeaGenError):
 class ProviderError(IdeaGenError):
     """AI provider error."""
 
+class ProviderTimeoutError(ProviderError):
+    """AI provider timed out — not retryable."""
+
 class ConfigError(IdeaGenError):
     """Configuration error."""
 

@@ -6,7 +6,7 @@ import shutil
 from typing import TypeVar
 from pydantic import BaseModel, ValidationError
 from ideagen.providers.base import AIProvider
-from ideagen.core.exceptions import ProviderError
+from ideagen.core.exceptions import ProviderError, ProviderTimeoutError
 from ideagen.utils.text import extract_json
 from ideagen.utils.retry import with_retry
 
@@ -17,7 +17,7 @@ T = TypeVar("T", bound=BaseModel)
 class ClaudeProvider(AIProvider):
     """AI provider that shells out to the `claude` CLI subprocess."""
 
-    def __init__(self, model: str | None = None, timeout: float = 120.0):
+    def __init__(self, model: str | None = None, timeout: float = 300.0):
         self._model = model
         self._timeout = timeout
         self._verified = False
@@ -49,7 +49,7 @@ class ClaudeProvider(AIProvider):
 
         self._verified = True
 
-    @with_retry(max_retries=2, base_delay=2.0, retryable_exceptions=(ProviderError, ValidationError))
+    @with_retry(max_retries=2, base_delay=2.0, retryable_exceptions=(ProviderError, ValidationError), non_retryable_exceptions=(ProviderTimeoutError,))
     async def complete(
         self,
         user_prompt: str,
@@ -88,7 +88,11 @@ class ClaudeProvider(AIProvider):
                 timeout=self._timeout,
             )
         except asyncio.TimeoutError:
-            raise ProviderError(f"Claude CLI timed out after {self._timeout}s")
+            try:
+                proc.kill()
+            except (ProcessLookupError, OSError):
+                pass
+            raise ProviderTimeoutError(f"Claude CLI timed out after {self._timeout}s")
         except Exception as e:
             raise ProviderError(f"Claude CLI subprocess error: {e}")
 

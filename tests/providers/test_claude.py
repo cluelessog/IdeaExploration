@@ -304,3 +304,72 @@ class TestRetry:
 
         assert result.value == "retry_ok"
         assert attempt == 2
+
+
+# ---------------------------------------------------------------------------
+# Timeout robustness (Phase 10 bug fix)
+# ---------------------------------------------------------------------------
+
+class TestTimeoutRobustness:
+    def test_default_timeout_is_300s(self):
+        """Default timeout should be 300s, not 120s, for complex AI analysis."""
+        p = ClaudeProvider()
+        assert p._timeout == 300.0
+
+    def test_custom_timeout_respected(self):
+        """Explicit timeout parameter is stored correctly."""
+        p = ClaudeProvider(timeout=60.0)
+        assert p._timeout == 60.0
+
+    @pytest.mark.asyncio
+    async def test_timeout_raises_provider_timeout_error(self, provider: ClaudeProvider):
+        """Timeout should raise ProviderTimeoutError (subclass of ProviderError)."""
+        from ideagen.core.exceptions import ProviderTimeoutError
+
+        proc = MagicMock()
+        proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError)
+        proc.kill = MagicMock()
+
+        with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc)):
+            with patch("asyncio.wait_for", AsyncMock(side_effect=asyncio.TimeoutError)):
+                with pytest.raises(ProviderTimeoutError):
+                    await provider.complete("test", SimpleResponse)
+
+    @pytest.mark.asyncio
+    async def test_timeout_does_not_retry(self):
+        """Timeout errors should NOT be retried — retrying with same timeout is wasteful."""
+        from ideagen.core.exceptions import ProviderTimeoutError
+
+        p = ClaudeProvider(timeout=1.0)
+        p._verified = True
+        call_count = 0
+
+        proc = MagicMock()
+        proc.kill = MagicMock()
+
+        async def fake_exec(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return proc
+
+        with patch("asyncio.create_subprocess_exec", fake_exec):
+            with patch("asyncio.wait_for", AsyncMock(side_effect=asyncio.TimeoutError)):
+                with pytest.raises(ProviderTimeoutError):
+                    await p.complete("test", SimpleResponse)
+
+        # Should be called exactly once — no retries on timeout
+        assert call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_subprocess_killed_on_timeout(self, provider: ClaudeProvider):
+        """Subprocess should be killed when timeout occurs to prevent zombies."""
+        proc = MagicMock()
+        proc.kill = MagicMock()
+        proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError)
+
+        with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc)):
+            with patch("asyncio.wait_for", AsyncMock(side_effect=asyncio.TimeoutError)):
+                with pytest.raises(Exception):
+                    await provider.complete("test", SimpleResponse)
+
+        proc.kill.assert_called_once()

@@ -14,6 +14,7 @@ def with_retry(
     base_delay: float = 1.0,
     max_delay: float = 60.0,
     retryable_exceptions: tuple[type[Exception], ...] = (Exception,),
+    non_retryable_exceptions: tuple[type[Exception], ...] = (),
 ) -> Callable[[F], F]:
     def decorator(func: F) -> F:
         @functools.wraps(func)
@@ -22,6 +23,8 @@ def with_retry(
             for attempt in range(max_retries + 1):
                 try:
                     return await func(*args, **kwargs)
+                except non_retryable_exceptions:
+                    raise
                 except retryable_exceptions as e:
                     last_exception = e
                     if attempt < max_retries:
