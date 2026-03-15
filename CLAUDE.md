@@ -84,7 +84,7 @@ Claude provider (`providers/claude.py`) shells out to `claude` CLI with `--outpu
 ## Workflow Rules
 
 - **Test-first bug fixes:** When fixing an issue, first write tests that reproduce the bug, then fix the code until all tests pass.
-- **Always use worktrees:** Start all work in a new git worktree to keep master clean.
+- **Always use worktrees:** Start all work in a new git worktree under `.claude/worktrees/` within the project directory. Never create worktrees outside the project root. Commit only to the worktree branch — do not merge to master without explicit user approval.
 
 ## Conventions
 
