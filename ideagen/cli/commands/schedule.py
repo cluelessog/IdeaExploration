@@ -23,6 +23,13 @@ def add_schedule(
     """Create a new generation schedule."""
     from ideagen.cli.schedule_store import install_cron, save_schedule
 
+    if daily and weekly:
+        typer.echo("Error: --daily and --weekly are mutually exclusive. Specify only one.", err=True)
+        raise typer.Exit(code=1)
+    if not daily and not weekly:
+        typer.echo("Error: Specify a frequency with --daily or --weekly.", err=True)
+        raise typer.Exit(code=1)
+
     frequency = "weekly" if weekly else "daily"
     schedule = {"frequency": frequency, "time": time, "domain": domain}
 

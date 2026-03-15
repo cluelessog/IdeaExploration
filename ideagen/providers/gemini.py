@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import TypeVar
 
@@ -41,16 +40,11 @@ class GeminiProvider(AIProvider):
         except ImportError:
             raise ConfigError("Google GenAI package not installed: pip install ideagen[gemini]")
 
-        schema = json.dumps(response_type.model_json_schema(), indent=2)
+        # Schema is already embedded by prompts.py (single source of truth); pass prompt through as-is
         parts = []
         if system_prompt:
             parts.append(system_prompt)
         parts.append(user_prompt)
-        parts.append(
-            f"\n\nRespond with ONLY a valid JSON object matching this schema:\n"
-            f"```json\n{schema}\n```\n"
-            f"Do not include any text outside the JSON."
-        )
         full_prompt = "\n\n".join(parts)
 
         try:

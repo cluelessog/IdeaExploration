@@ -78,12 +78,13 @@ ideagen config init  # Creates ~/.ideagen/config.toml
 Example `config.toml`:
 
 ```toml
-[provider]
-name = "claude"
+[providers]
+default = "claude"
 
 [sources]
 enabled = ["hackernews", "reddit", "producthunt", "twitter"]
-items_per_source = 25
+scrape_delay = 2.0
+reddit_subreddits = ["SaaS", "startups", "Entrepreneur", "smallbusiness"]
 
 [generation]
 ideas_per_run = 10
@@ -91,7 +92,7 @@ dedup_threshold = 0.85
 target_segments = ["parents", "pet_owners", "small_business"]
 
 [storage]
-db_path = "~/.ideagen/ideagen.db"
+database_path = "~/.ideagen/ideagen.db"
 ```
 
 ## Alternative AI Providers

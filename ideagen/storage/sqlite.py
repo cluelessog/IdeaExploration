@@ -124,7 +124,7 @@ class SQLiteStorage(StorageBackend):
         db = await self._ensure_db()
         try:
             cursor = await db.execute(
-                "SELECT * FROM runs WHERE id LIKE ? LIMIT 1",
+                "SELECT * FROM runs WHERE id LIKE ? ORDER BY timestamp DESC LIMIT 1",
                 (f"{run_id_prefix}%",),
             )
             run_row = await cursor.fetchone()

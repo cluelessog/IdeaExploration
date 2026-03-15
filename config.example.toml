@@ -9,10 +9,8 @@ domain = "software"
 [sources]
 enabled = ["hackernews", "reddit", "producthunt", "twitter"]
 scrape_delay = 2.0
+reddit_subreddits = ["SaaS", "startups", "Entrepreneur", "smallbusiness"]
 # proxy_url = "http://localhost:8080"
-
-[sources.reddit]
-subreddits = ["SaaS", "startups", "Entrepreneur", "smallbusiness"]
 
 [providers]
 default = "claude"

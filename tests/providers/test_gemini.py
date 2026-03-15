@@ -115,3 +115,68 @@ class TestGeminiProviderComplete:
         call_args = mock_aio.models.generate_content.call_args
         contents = call_args.kwargs.get("contents", call_args[1].get("contents", ""))
         assert "Be creative" in contents
+
+
+# ---------------------------------------------------------------------------
+# No schema injection (Audit Finding #8)
+# ---------------------------------------------------------------------------
+
+class TestGeminiNoSchemaInjection:
+    @pytest.mark.asyncio
+    async def test_contents_does_not_duplicate_schema(self):
+        """Contents sent to Gemini must not append schema if already in prompt."""
+        mock_google = MagicMock()
+        mock_genai = MagicMock()
+        response_json = json.dumps({"answer": "ok", "score": 1})
+
+        mock_aio = AsyncMock()
+        mock_aio.models.generate_content = AsyncMock(
+            return_value=SimpleNamespace(text=response_json)
+        )
+        mock_client = MagicMock()
+        mock_client.aio = mock_aio
+        mock_genai.Client = MagicMock(return_value=mock_client)
+
+        schema_str = json.dumps(SampleResponse.model_json_schema(), indent=2)
+        prompt_with_schema = f"Do analysis.\n\nSchema:\n```json\n{schema_str}\n```"
+
+        with patch.dict(sys.modules, {"google": mock_google, "google.genai": mock_genai}):
+            mock_google.genai = mock_genai
+            from ideagen.providers.gemini import GeminiProvider
+            provider = GeminiProvider.__new__(GeminiProvider)
+            provider._api_key = "test-key"
+            provider._model = "gemini-2.0-flash"
+            await provider.complete(prompt_with_schema, SampleResponse)
+
+        call_args = mock_aio.models.generate_content.call_args
+        contents = call_args.kwargs.get("contents", call_args[1].get("contents", ""))
+        assert contents.count(schema_str) == 1, (
+            f"Schema duplicated {contents.count(schema_str)} times; expected 1"
+        )
+
+    @pytest.mark.asyncio
+    async def test_plain_prompt_not_augmented_with_schema(self):
+        """Provider must NOT append 'Respond with ONLY a valid JSON' to contents."""
+        mock_google = MagicMock()
+        mock_genai = MagicMock()
+        response_json = json.dumps({"answer": "ok", "score": 1})
+
+        mock_aio = AsyncMock()
+        mock_aio.models.generate_content = AsyncMock(
+            return_value=SimpleNamespace(text=response_json)
+        )
+        mock_client = MagicMock()
+        mock_client.aio = mock_aio
+        mock_genai.Client = MagicMock(return_value=mock_client)
+
+        with patch.dict(sys.modules, {"google": mock_google, "google.genai": mock_genai}):
+            mock_google.genai = mock_genai
+            from ideagen.providers.gemini import GeminiProvider
+            provider = GeminiProvider.__new__(GeminiProvider)
+            provider._api_key = "test-key"
+            provider._model = "gemini-2.0-flash"
+            await provider.complete("simple prompt", SampleResponse)
+
+        call_args = mock_aio.models.generate_content.call_args
+        contents = call_args.kwargs.get("contents", call_args[1].get("contents", ""))
+        assert "Respond with ONLY" not in contents

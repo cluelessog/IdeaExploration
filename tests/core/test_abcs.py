@@ -281,7 +281,7 @@ class TestStorageBackendConcreteSubclass:
             async def save_scrape_cache(self, batch_id: str, source: str, items: list) -> None:
                 pass
 
-            async def load_latest_scrape_cache(self) -> list:
+            async def load_latest_scrape_cache(self, source_names: list[str] | None = None) -> list:
                 return []
 
             async def find_runs_by_content_hash(self, content_hash: str, exclude_id: str | None = None) -> list[dict]:

@@ -58,17 +58,11 @@ class ClaudeProvider(AIProvider):
     ) -> T:
         await self._verify_cli()
 
-        # Build the full prompt with JSON schema instructions
-        schema = json.dumps(response_type.model_json_schema(), indent=2)
+        # Build the full prompt — schema is already embedded by prompts.py (single source of truth)
         parts = []
         if system_prompt:
             parts.append(system_prompt)
         parts.append(user_prompt)
-        parts.append(
-            f"\n\nRespond with ONLY a valid JSON object matching this schema:\n"
-            f"```json\n{schema}\n```\n"
-            f"Do not include any text outside the JSON."
-        )
         full_prompt = "\n\n".join(parts)
 
         # Build command
@@ -97,8 +91,28 @@ class ClaudeProvider(AIProvider):
             raise ProviderError(f"Claude CLI subprocess error: {e}")
 
         if proc.returncode != 0:
-            stderr_text = stderr_bytes.decode("utf-8", errors="replace")
-            raise ProviderError(f"Claude CLI exited with code {proc.returncode}: {stderr_text[:500]}")
+            stderr_text = stderr_bytes.decode("utf-8", errors="replace").strip()
+            stdout_text = stdout_bytes.decode("utf-8", errors="replace").strip()
+
+            # Claude CLI often puts structured errors in stdout JSON
+            error_detail = stderr_text
+            try:
+                envelope = json.loads(stdout_text)
+                if isinstance(envelope, dict):
+                    if envelope.get("is_error"):
+                        error_detail = envelope.get("result", envelope.get("error", stdout_text))
+                    elif "error" in envelope:
+                        error_detail = envelope["error"]
+            except (json.JSONDecodeError, KeyError):
+                # If stdout isn't parseable JSON, combine both if available
+                if stdout_text and not stderr_text:
+                    error_detail = stdout_text
+                elif stdout_text and stderr_text:
+                    error_detail = f"{stderr_text} | stdout: {stdout_text[:200]}"
+
+            raise ProviderError(
+                f"Claude CLI exited with code {proc.returncode}: {error_detail[:500]}"
+            )
 
         stdout_text = stdout_bytes.decode("utf-8")
 

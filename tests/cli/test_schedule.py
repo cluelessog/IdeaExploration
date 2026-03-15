@@ -126,7 +126,9 @@ def test_cron_install_called(tmp_path: Path) -> None:
 
     schedule = {"id": "test1234", "frequency": "daily", "time": "09:00", "domain": "software"}
 
-    with patch("ideagen.cli.schedule_store.subprocess.run") as mock_run:
+    with patch("ideagen.cli.schedule_store.sys") as mock_sys, \
+         patch("ideagen.cli.schedule_store.subprocess.run") as mock_run:
+        mock_sys.platform = "linux"
         # First call: crontab -l returns existing
         mock_run.return_value.returncode = 0
         mock_run.return_value.stdout = ""
@@ -353,3 +355,46 @@ def test_install_cron_wsl_still_attempts_cron() -> None:
 
     assert result is True
     assert mock_run.call_count == 2  # crontab -l and crontab -
+
+
+# ---------------------------------------------------------------------------
+# Mutual exclusivity tests for --daily/--weekly (Audit Finding #14)
+# ---------------------------------------------------------------------------
+
+
+def test_schedule_daily_and_weekly_exclusive(runner: CliRunner, tmp_path: Path) -> None:
+    """Providing both --daily and --weekly should error with a clear message."""
+    schedule_file = tmp_path / "schedules.toml"
+    result = runner.invoke(
+        app,
+        ["schedule", "add", "--daily", "--weekly", "--schedule-file", str(schedule_file)],
+    )
+    assert result.exit_code != 0
+    output = result.output.lower()
+    assert "mutually exclusive" in output or "exclusive" in output or "both" in output
+
+
+def test_schedule_neither_flag_errors(runner: CliRunner, tmp_path: Path) -> None:
+    """Providing neither --daily nor --weekly should error with guidance."""
+    schedule_file = tmp_path / "schedules.toml"
+    result = runner.invoke(
+        app,
+        ["schedule", "add", "--schedule-file", str(schedule_file)],
+    )
+    assert result.exit_code != 0
+    output = result.output.lower()
+    assert "--daily" in output or "--weekly" in output or "frequency" in output
+
+
+def test_schedule_single_flag_works(runner: CliRunner, tmp_path: Path) -> None:
+    """--daily alone and --weekly alone should both succeed."""
+    for flag in ["--daily", "--weekly"]:
+        schedule_file = tmp_path / f"schedules_{flag.strip('-')}.toml"
+        with patch("ideagen.cli.schedule_store.install_cron", return_value=True):
+            result = runner.invoke(
+                app,
+                ["schedule", "add", flag, "--time", "09:00", "--domain", "software",
+                 "--schedule-file", str(schedule_file)],
+            )
+        assert result.exit_code == 0, f"{flag} alone should succeed, got: {result.output}"
+        assert "created" in result.output.lower()

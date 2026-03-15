@@ -24,6 +24,10 @@ def with_retry(
                 try:
                     return await func(*args, **kwargs)
                 except non_retryable_exceptions:
+                    # Caught BEFORE retryable_exceptions intentionally:
+                    # non-retryable takes priority even if it's a subclass
+                    # of a retryable exception (e.g. ProviderTimeoutError
+                    # is a ProviderError but should never be retried).
                     raise
                 except retryable_exceptions as e:
                     last_exception = e

@@ -7,6 +7,7 @@ import pytest
 from pydantic import BaseModel
 
 from ideagen.core.config import IdeaGenConfig, GenerationConfig
+from ideagen.core.exceptions import SourceUnavailableError
 from ideagen.core.models import (
     CancellationToken,
     Domain,
@@ -20,6 +21,7 @@ from ideagen.core.models import (
     PainPoint,
     PipelineComplete,
     PipelineEvent,
+    SourceFailed,
     StageCompleted,
     StageStarted,
     TrendingItem,
@@ -57,6 +59,24 @@ class MockSource(DataSource):
 
     async def is_available(self) -> bool:
         return not self._fail
+
+
+class FailingSource(DataSource):
+    """DataSource that always raises SourceUnavailableError."""
+
+    def __init__(self, name_: str, error_msg: str = "source unavailable"):
+        self._name = name_
+        self._error_msg = error_msg
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    async def collect(self, domain: Domain, limit: int = 50) -> list[TrendingItem]:
+        raise SourceUnavailableError(self._error_msg)
+
+    async def is_available(self) -> bool:
+        return False
 
 
 class MockProvider(AIProvider):
@@ -701,3 +721,99 @@ class TestCachedEmptyWarning:
 
         complete_events = [e for e in events if isinstance(e, PipelineComplete)]
         assert len(complete_events) == 1
+
+
+# ---------------------------------------------------------------------------
+# SourceFailed events (Audit Finding #7)
+# ---------------------------------------------------------------------------
+
+class TestSourceFailedEvents:
+    async def test_source_failed_event_yielded(self):
+        """One source raises SourceUnavailableError, SourceFailed event appears in event stream."""
+        good = MockSource("hackernews", [_trending_item()])
+        bad = FailingSource("reddit", error_msg="connection refused")
+        provider = MockProvider()
+        _queue_full_pipeline(provider)
+
+        service = IdeaGenService(
+            sources={"hackernews": good, "reddit": bad},
+            provider=provider,
+        )
+        events = await _collect_events(service)
+
+        failed_events = [e for e in events if isinstance(e, SourceFailed)]
+        assert len(failed_events) == 1
+        assert failed_events[0].source == "reddit"
+        assert "connection refused" in failed_events[0].error
+
+    async def test_all_sources_fail_still_completes(self):
+        """All sources fail, pipeline yields SourceFailed events and still completes."""
+        bad1 = FailingSource("hackernews", error_msg="timeout")
+        bad2 = FailingSource("reddit", error_msg="forbidden")
+        provider = MockProvider()
+
+        service = IdeaGenService(
+            sources={"hackernews": bad1, "reddit": bad2},
+            provider=provider,
+        )
+        events = await _collect_events(service)
+
+        failed_events = [e for e in events if isinstance(e, SourceFailed)]
+        assert len(failed_events) == 2
+        source_names = {e.source for e in failed_events}
+        assert source_names == {"hackernews", "reddit"}
+
+        # Pipeline should still complete
+        complete_events = [e for e in events if isinstance(e, PipelineComplete)]
+        assert len(complete_events) == 1
+
+    async def test_partial_failure_continues(self):
+        """One source fails, others succeed, pipeline continues with successful data."""
+        good = MockSource("hackernews", [_trending_item("Good item")])
+        bad = FailingSource("reddit", error_msg="service down")
+        provider = MockProvider()
+        _queue_full_pipeline(provider)
+
+        service = IdeaGenService(
+            sources={"hackernews": good, "reddit": bad},
+            provider=provider,
+        )
+        events = await _collect_events(service)
+
+        # SourceFailed for reddit
+        failed_events = [e for e in events if isinstance(e, SourceFailed)]
+        assert len(failed_events) == 1
+        assert failed_events[0].source == "reddit"
+
+        # Good item still processed
+        collect_completed = next(
+            e for e in events
+            if isinstance(e, StageCompleted) and e.stage == "collect"
+        )
+        assert collect_completed.metadata["total_items"] == 1
+
+        # Pipeline completed with ideas from the successful source
+        assert isinstance(events[-1], PipelineComplete)
+
+    async def test_source_failed_emitted_after_collect_stage_completed(self):
+        """SourceFailed events appear after StageCompleted('collect') in the stream."""
+        good = MockSource("hackernews", [_trending_item()])
+        bad = FailingSource("reddit", error_msg="unavailable")
+        provider = MockProvider()
+        _queue_full_pipeline(provider)
+
+        service = IdeaGenService(
+            sources={"hackernews": good, "reddit": bad},
+            provider=provider,
+        )
+        events = await _collect_events(service)
+
+        collect_completed_idx = next(
+            i for i, e in enumerate(events)
+            if isinstance(e, StageCompleted) and e.stage == "collect"
+        )
+        failed_idx = next(
+            i for i, e in enumerate(events)
+            if isinstance(e, SourceFailed)
+        )
+        assert failed_idx > collect_completed_idx

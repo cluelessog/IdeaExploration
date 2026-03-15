@@ -51,7 +51,12 @@ def run_command(
 
     # Map domain string to enum
     domain_map = {"software": Domain.SOFTWARE_SAAS, "business": Domain.BROAD_BUSINESS, "content": Domain.CONTENT_MEDIA}
-    domain_enum = domain_map.get(domain, Domain.SOFTWARE_SAAS)
+    if domain not in domain_map:
+        raise typer.BadParameter(
+            f"Unknown domain '{domain}'. Valid options: {', '.join(domain_map.keys())}",
+            param_hint="'--domain'",
+        )
+    domain_enum = domain_map[domain]
 
     # Resolve sources: CLI --source overrides config
     source_names = source if source else config.sources.enabled
@@ -61,7 +66,11 @@ def run_command(
         typer.echo(f"Error: no valid sources found. Valid source names: {valid}", err=True)
         raise typer.Exit(code=1)
 
-    provider = get_provider(config.providers)
+    if dry_run:
+        from ideagen.providers.dry_run import DryRunProvider
+        provider = DryRunProvider()
+    else:
+        provider = get_provider(config.providers)
     storage = SQLiteStorage(db_path=config.storage.database_path)
 
     service = IdeaGenService(sources=sources, provider=provider, storage=storage, config=config)
@@ -96,7 +105,7 @@ def run_command(
 
             if output:
                 from ideagen.storage.json_export import export_run
-                path = export_run(result, output_dir=str(output.parent))
+                path = export_run(result, output_path=output)
                 console.print(f"[green]Results exported to {path}[/green]")
         elif result:
             console.print("[yellow]No ideas generated. Try different domain or segments.[/yellow]")

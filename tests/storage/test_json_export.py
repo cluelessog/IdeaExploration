@@ -212,3 +212,49 @@ def test_export_idea_long_title_truncated(tmp_path: Path) -> None:
     # idea_ prefix + max 50 chars of title + .json
     name_without_prefix = file_path.stem[len("idea_"):]
     assert len(name_without_prefix) <= 50
+
+
+# ---------------------------------------------------------------------------
+# output_path parameter tests (Audit Finding #10)
+# ---------------------------------------------------------------------------
+
+def test_export_honors_exact_filename(tmp_path: Path) -> None:
+    """export_run writes to the exact path when output_path has a file suffix."""
+    target = tmp_path / "my-results.json"
+    run = _make_run()
+    file_path = export_run(run, output_path=target)
+    assert file_path == target
+    assert target.exists()
+    data = json.loads(target.read_text())
+    assert isinstance(data, dict)
+
+
+def test_export_dir_generates_timestamp(tmp_path: Path) -> None:
+    """export_run generates a timestamped filename when output_path is a directory."""
+    out_dir = tmp_path / "outdir"
+    run = _make_run()
+    file_path = export_run(run, output_path=out_dir)
+    assert file_path.parent == out_dir
+    assert file_path.name.startswith("ideagen_run_")
+    assert file_path.suffix == ".json"
+    assert file_path.exists()
+
+
+def test_export_creates_parent_dirs(tmp_path: Path) -> None:
+    """export_run creates missing parent directories when output_path is given."""
+    target = tmp_path / "deep" / "nested" / "results.json"
+    assert not target.parent.exists()
+    run = _make_run()
+    file_path = export_run(run, output_path=target)
+    assert file_path == target
+    assert target.exists()
+
+
+def test_export_no_output_path_uses_default(tmp_path: Path) -> None:
+    """export_run uses timestamped filename in output_dir when no output_path given."""
+    run = _make_run()
+    file_path = export_run(run, output_dir=str(tmp_path))
+    assert file_path.parent == tmp_path
+    assert file_path.name.startswith("ideagen_run_")
+    assert file_path.suffix == ".json"
+    assert file_path.exists()

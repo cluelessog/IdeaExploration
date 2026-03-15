@@ -25,14 +25,25 @@ def compare_runs_cmd(
     config = load_config(config_path)
     storage = SQLiteStorage(db_path=config.storage.database_path)
 
-    detail_a = run_async(storage.get_run_detail(run1))
-    detail_b = run_async(storage.get_run_detail(run2))
+    def resolve_run(prefix: str) -> "dict | None":
+        matches = run_async(storage.find_runs_by_prefix(prefix))
+        if not matches:
+            console.print(f"[red]No run found matching '{prefix}'[/red]")
+            return None
+        if len(matches) > 1:
+            console.print(
+                f"[yellow]Ambiguous prefix '{prefix}' matches {len(matches)} runs. "
+                f"Using most recent: {matches[0]['id'][:12]}... "
+                f"Use a longer prefix to be specific.[/yellow]"
+            )
+        return run_async(storage.get_run_detail(matches[0]["id"]))
+
+    detail_a = resolve_run(run1)
+    detail_b = resolve_run(run2)
 
     if detail_a is None:
-        console.print(f"[red]No run found matching '{run1}'[/red]")
         raise typer.Exit(code=1)
     if detail_b is None:
-        console.print(f"[red]No run found matching '{run2}'[/red]")
         raise typer.Exit(code=1)
 
     result = compare_runs(detail_a, detail_b, threshold=threshold)

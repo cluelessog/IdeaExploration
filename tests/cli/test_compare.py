@@ -79,3 +79,64 @@ def test_compare_invalid_run2(runner: CliRunner, tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     assert "No run found" in result.output
+
+
+def test_compare_ambiguous_prefix_shows_warning(runner: CliRunner, tmp_path: Path) -> None:
+    """Ambiguous prefix matching 2 runs shows warning and uses most recent."""
+    from ideagen.cli.async_bridge import run_async
+    from datetime import datetime, timedelta
+
+    storage = SQLiteStorage(db_path=str(tmp_path / "test.db"))
+    # Save two runs with different timestamps; we'll use a prefix that matches both
+    run_a = make_run("Idea A", timestamp=datetime(2024, 1, 1))
+    run_b = make_run("Idea B", timestamp=datetime(2024, 1, 2))
+    id_a = run_async(storage.save_run(run_a))
+    id_b = run_async(storage.save_run(run_b))
+
+    # A prefix of empty string matches all; use real prefix of shared chars
+    # Instead, patch find_runs_by_prefix to return two fake matches so we
+    # control the ambiguity without needing shared UUID prefixes.
+    shared_prefix = id_a[:4]
+
+    # Save a second run whose ID happens to share the same first 4 chars is not
+    # guaranteed, so we patch storage.find_runs_by_prefix instead.
+    with patch("ideagen.cli.config_loader.load_config") as mock_config:
+        mock_config.return_value.storage.database_path = str(tmp_path / "test.db")
+        with patch("ideagen.storage.sqlite.SQLiteStorage.find_runs_by_prefix") as mock_prefix:
+            # Return two matches — most-recent first (id_b is newer)
+            mock_prefix.return_value = [
+                {"id": id_b, "timestamp": "2024-01-02T00:00:00", "domain": "software_saas"},
+                {"id": id_a, "timestamp": "2024-01-01T00:00:00", "domain": "software_saas"},
+            ]
+            result = runner.invoke(app, ["compare", shared_prefix, id_b])
+
+    assert result.exit_code == 0
+    assert "Ambiguous" in result.output
+
+
+def test_compare_exact_match_no_warning(runner: CliRunner, tmp_path: Path) -> None:
+    """Full run ID (exact match) produces no ambiguity warning."""
+    from ideagen.cli.async_bridge import run_async
+
+    storage = SQLiteStorage(db_path=str(tmp_path / "test.db"))
+    run_a = make_run("Idea A")
+    run_b = make_run("Idea B")
+    id_a = run_async(storage.save_run(run_a))
+    id_b = run_async(storage.save_run(run_b))
+
+    with patch("ideagen.cli.config_loader.load_config") as mock_config:
+        mock_config.return_value.storage.database_path = str(tmp_path / "test.db")
+        result = runner.invoke(app, ["compare", id_a, id_b])
+
+    assert result.exit_code == 0
+    assert "Ambiguous" not in result.output
+
+
+def test_compare_no_match_shows_error(runner: CliRunner, tmp_path: Path) -> None:
+    """Prefix matching no runs shows a clear error and exits non-zero."""
+    with patch("ideagen.cli.config_loader.load_config") as mock_config:
+        mock_config.return_value.storage.database_path = str(tmp_path / "test.db")
+        result = runner.invoke(app, ["compare", "nonexistent-prefix", "another-prefix"])
+
+    assert result.exit_code == 1
+    assert "No run found" in result.output

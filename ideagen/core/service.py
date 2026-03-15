@@ -69,13 +69,15 @@ class IdeaGenService:
         else:
             yield StageStarted(stage="collect", metadata={"sources": list(self._sources.keys())})
             start = time.monotonic()
-            per_source = await self._collect_all(domain)
+            per_source, source_failures = await self._collect_all(domain)
             all_items = [item for items in per_source.values() for item in items]
             duration = int((time.monotonic() - start) * 1000)
             yield StageCompleted(
                 stage="collect", duration_ms=duration,
                 metadata={"total_items": len(all_items)},
             )
+            for failed_event in source_failures:
+                yield failed_event
             # Save to cache for future --cached runs
             if self._storage and per_source:
                 batch_id = str(uuid.uuid4())
@@ -200,9 +202,10 @@ class IdeaGenService:
 
         yield PipelineComplete(result=result)
 
-    async def _collect_all(self, domain: Domain) -> dict[str, list[TrendingItem]]:
+    async def _collect_all(self, domain: Domain) -> tuple[dict[str, list[TrendingItem]], list[SourceFailed]]:
         """Collect from all sources in parallel, handling failures gracefully."""
         per_source: dict[str, list[TrendingItem]] = {}
+        failed_events: list[SourceFailed] = []
 
         async def collect_one(name: str, source: DataSource) -> tuple[str, list[TrendingItem], str | None]:
             try:
@@ -217,8 +220,9 @@ class IdeaGenService:
         for name, items, error in results:
             if error:
                 logger.warning(f"Source '{name}' failed: {error}")
+                failed_events.append(SourceFailed(source=name, error=error))
             else:
                 logger.info(f"Source '{name}' returned {len(items)} items")
                 per_source[name] = items
 
-        return per_source
+        return per_source, failed_events

@@ -1,7 +1,9 @@
 from __future__ import annotations
 import logging
+import sys
 import tomllib
 from pathlib import Path
+from pydantic import ValidationError
 from ideagen.core.config import IdeaGenConfig
 
 logger = logging.getLogger("ideagen")
@@ -20,9 +22,26 @@ def load_config(config_path: Path | None = None) -> IdeaGenConfig:
     try:
         with open(path, "rb") as f:
             data = tomllib.load(f)
+    except tomllib.TOMLDecodeError as e:
+        msg = f"Warning: Could not parse config file {path}: {e}. Using defaults."
+        logger.warning(msg)
+        print(msg, file=sys.stderr)
+        return IdeaGenConfig()
+
+    try:
         return IdeaGenConfig(**data)
+    except ValidationError as e:
+        fields = ", ".join(
+            ".".join(str(loc) for loc in err["loc"]) for err in e.errors()
+        )
+        msg = f"Warning: Invalid field(s) in config file {path}: {fields}. Using defaults."
+        logger.warning(msg)
+        print(msg, file=sys.stderr)
+        return IdeaGenConfig()
     except Exception as e:
-        logger.warning(f"Failed to load config from {path}: {e}. Using defaults.")
+        msg = f"Warning: Failed to load config from {path}: {e}. Using defaults."
+        logger.warning(msg)
+        print(msg, file=sys.stderr)
         return IdeaGenConfig()
 
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import TypeVar
 
@@ -41,18 +40,11 @@ class OpenAIProvider(AIProvider):
         except ImportError:
             raise ConfigError("OpenAI package not installed: pip install ideagen[openai]")
 
-        schema = json.dumps(response_type.model_json_schema(), indent=2)
-        user_with_schema = (
-            f"{user_prompt}\n\n"
-            f"Respond with ONLY a valid JSON object matching this schema:\n"
-            f"```json\n{schema}\n```\n"
-            f"Do not include any text outside the JSON."
-        )
-
+        # Schema is already embedded by prompts.py (single source of truth); pass prompt through as-is
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": user_with_schema})
+        messages.append({"role": "user", "content": user_prompt})
 
         client = AsyncOpenAI(api_key=self._api_key)
         try:

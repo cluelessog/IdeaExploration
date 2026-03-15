@@ -373,3 +373,121 @@ class TestTimeoutRobustness:
                     await provider.complete("test", SimpleResponse)
 
         proc.kill.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Error reporting — stdout JSON vs stderr (Audit Finding #6)
+# ---------------------------------------------------------------------------
+
+class TestErrorReporting:
+    @pytest.mark.asyncio
+    async def test_error_in_stdout_json_reported(self, provider: ClaudeProvider):
+        """Non-zero exit with JSON is_error in stdout → error message includes result text."""
+        error_envelope = json.dumps({"is_error": True, "result": "auth failed"}).encode("utf-8")
+        proc = _make_process(stdout=error_envelope, stderr=b"", returncode=1)
+
+        with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc)):
+            with pytest.raises(ProviderError, match="auth failed"):
+                await provider.complete("test", SimpleResponse)
+
+    @pytest.mark.asyncio
+    async def test_error_stderr_fallback(self, provider: ClaudeProvider):
+        """Non-zero exit with no parseable JSON stdout → falls back to stderr text."""
+        proc = _make_process(stdout=b"not valid json", stderr=b"connection refused", returncode=1)
+
+        with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc)):
+            with pytest.raises(ProviderError, match="connection refused"):
+                await provider.complete("test", SimpleResponse)
+
+    @pytest.mark.asyncio
+    async def test_error_both_streams_combined(self, provider: ClaudeProvider):
+        """Non-zero exit with unparseable stdout and stderr → both included in message."""
+        proc = _make_process(
+            stdout=b"stdout detail",
+            stderr=b"stderr detail",
+            returncode=1,
+        )
+
+        with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc)):
+            with pytest.raises(ProviderError) as exc_info:
+                await provider.complete("test", SimpleResponse)
+
+        error_msg = str(exc_info.value)
+        assert "stderr detail" in error_msg
+        assert "stdout detail" in error_msg
+
+    @pytest.mark.asyncio
+    async def test_zero_exit_with_is_error_flag(self, provider: ClaudeProvider):
+        """Exit code 0 with is_error in stdout → treated as success (don't inspect is_error on success)."""
+        payload = json.dumps({"value": "ok", "count": 1})
+        # Envelope has is_error but exit code is 0 — should still succeed
+        envelope = json.dumps({"result": payload, "is_error": False}).encode("utf-8")
+        proc = _make_process(stdout=envelope, stderr=b"", returncode=0)
+
+        with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc)):
+            result = await provider.complete("test", SimpleResponse)
+
+        assert result.value == "ok"
+        assert result.count == 1
+
+
+# ---------------------------------------------------------------------------
+# No schema injection (Audit Finding #8)
+# ---------------------------------------------------------------------------
+
+class TestNoSchemaInjection:
+    @pytest.mark.asyncio
+    async def test_prompt_sent_to_subprocess_does_not_duplicate_schema(self, provider: ClaudeProvider):
+        """The prompt passed to the subprocess should NOT contain the schema twice.
+        prompts.py already embeds schema once; providers must not re-append it."""
+        schema_str = json.dumps(SimpleResponse.model_json_schema(), indent=2)
+        # Simulate a prompt that already contains schema (as prompts.py would produce)
+        user_prompt_with_schema = f"Analyze this.\n\nMatch this schema:\n```json\n{schema_str}\n```"
+
+        payload = json.dumps({"value": "ok", "count": 0})
+        proc = _make_process(_json_envelope(payload))
+
+        captured_input: list[bytes] = []
+        original_communicate = proc.communicate
+
+        async def capturing_communicate(input=None):
+            if input:
+                captured_input.append(input)
+            return await original_communicate()
+
+        proc.communicate = capturing_communicate
+
+        with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc)):
+            await provider.complete(user_prompt_with_schema, SimpleResponse)
+
+        assert captured_input, "communicate was not called with input"
+        text = captured_input[0].decode("utf-8")
+        # Schema string should appear exactly once in the sent prompt
+        assert text.count(schema_str) == 1, (
+            f"Schema was injected {text.count(schema_str)} times; expected exactly 1"
+        )
+
+    @pytest.mark.asyncio
+    async def test_plain_prompt_passed_through_unchanged(self, provider: ClaudeProvider):
+        """A plain user prompt (without schema) is passed through without any schema appended."""
+        payload = json.dumps({"value": "ok", "count": 0})
+        proc = _make_process(_json_envelope(payload))
+
+        captured_input: list[bytes] = []
+        original_communicate = proc.communicate
+
+        async def capturing_communicate(input=None):
+            if input:
+                captured_input.append(input)
+            return await original_communicate()
+
+        proc.communicate = capturing_communicate
+
+        with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc)):
+            await provider.complete("simple prompt", SimpleResponse)
+
+        assert captured_input, "communicate was not called with input"
+        text = captured_input[0].decode("utf-8")
+        # Provider must NOT append "Respond with ONLY a valid JSON" schema instructions
+        assert "Respond with ONLY" not in text
+        assert "model_json_schema" not in text
