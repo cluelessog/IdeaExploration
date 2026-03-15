@@ -3,9 +3,26 @@ from pathlib import Path
 from typing import Optional
 import typer
 from rich.console import Console
-from ideagen.core.models import CancellationToken, Domain
+from ideagen.core.models import CancellationToken, Domain, PipelineComplete
 
 run_app = typer.Typer(name="run", help="Run idea generation pipeline.")
+
+
+async def _consume_pipeline_for_test(events):
+    """Consume pipeline events, returning the final RunResult or None.
+
+    Ensures the async generator is closed even on early return or exception.
+    """
+    try:
+        async for event in events:
+            if isinstance(event, PipelineComplete):
+                return event.result
+        return None
+    finally:
+        if hasattr(events, 'aclose'):
+            await events.aclose()
+
+
 console = Console()
 
 
@@ -29,7 +46,6 @@ def run_command(
     from ideagen.providers.registry import get_provider
     from ideagen.core.service import IdeaGenService
     from ideagen.storage.sqlite import SQLiteStorage
-    from ideagen.core.models import PipelineComplete
 
     config = load_config(config_path)
 
@@ -39,7 +55,7 @@ def run_command(
 
     # Resolve sources: CLI --source overrides config
     source_names = source if source else config.sources.enabled
-    sources = get_sources_by_names(source_names)
+    sources = get_sources_by_names(source_names, source_config=config.sources)
     if source and not sources:
         valid = ", ".join(get_available_source_names())
         typer.echo(f"Error: no valid sources found. Valid source names: {valid}", err=True)
@@ -51,12 +67,7 @@ def run_command(
     service = IdeaGenService(sources=sources, provider=provider, storage=storage, config=config)
     token = CancellationToken()
 
-    async def _consume_pipeline(events):
-        """Consume pipeline events silently, returning the final result."""
-        async for event in events:
-            if isinstance(event, PipelineComplete):
-                return event.result
-        return None
+    _consume_pipeline = _consume_pipeline_for_test
 
     if fmt == "rich":
         renderer = PipelineEventRenderer(console=console)

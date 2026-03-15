@@ -17,14 +17,26 @@ class SQLiteStorage(StorageBackend):
     """SQLite-based storage backend using aiosqlite."""
 
     def __init__(self, db_path: str = "~/.ideagen/ideagen.db"):
-        self._db_path = Path(db_path).expanduser()
+        raw = str(db_path)
+        self._is_memory = raw == ":memory:"
+        self._db_path = Path(raw).expanduser() if not self._is_memory else Path(raw)
         self._initialized = False
+        # Persistent connection held for :memory: databases so data is not lost
+        # between method calls (each aiosqlite.connect(":memory:") creates a
+        # separate, empty, in-process database).
+        self._conn: aiosqlite.Connection | None = None
 
     async def _ensure_db(self) -> aiosqlite.Connection:
         """Create database and tables if they don't exist."""
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        db = await aiosqlite.connect(str(self._db_path))
-        db.row_factory = aiosqlite.Row
+        if self._is_memory:
+            if self._conn is None:
+                self._conn = await aiosqlite.connect(":memory:")
+                self._conn.row_factory = aiosqlite.Row
+            db = self._conn
+        else:
+            self._db_path.parent.mkdir(parents=True, exist_ok=True)
+            db = await aiosqlite.connect(str(self._db_path))
+            db.row_factory = aiosqlite.Row
 
         if not self._initialized:
             await db.executescript(CREATE_TABLES)
@@ -37,6 +49,18 @@ class SQLiteStorage(StorageBackend):
             self._initialized = True
 
         return db
+
+    async def _release_db(self, db: aiosqlite.Connection) -> None:
+        """Close the connection unless it is the persistent :memory: connection."""
+        if not self._is_memory:
+            await db.close()
+
+    async def close(self) -> None:
+        """Close the persistent connection (only relevant for :memory: databases)."""
+        if self._conn is not None:
+            await self._conn.close()
+            self._conn = None
+            self._initialized = False
 
     async def save_run(self, result: RunResult) -> str:
         run_id = str(uuid.uuid4())
@@ -83,7 +107,7 @@ class SQLiteStorage(StorageBackend):
             await db.commit()
             return run_id
         finally:
-            await db.close()
+            await self._release_db(db)
 
     async def get_runs(self, offset: int = 0, limit: int = 20, **filters: Any) -> list[dict]:
         db = await self._ensure_db()
@@ -93,7 +117,7 @@ class SQLiteStorage(StorageBackend):
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
         finally:
-            await db.close()
+            await self._release_db(db)
 
     async def get_run_detail(self, run_id_prefix: str) -> dict | None:
         """Get full run details including ideas by ID prefix."""
@@ -118,7 +142,7 @@ class SQLiteStorage(StorageBackend):
             ]
             return run
         finally:
-            await db.close()
+            await self._release_db(db)
 
     async def get_idea(self, idea_id: str) -> IdeaReport | None:
         db = await self._ensure_db()
@@ -129,7 +153,7 @@ class SQLiteStorage(StorageBackend):
                 return None
             return IdeaReport.model_validate_json(row[0])
         finally:
-            await db.close()
+            await self._release_db(db)
 
     async def search_ideas(self, query: str, offset: int = 0, limit: int = 50) -> list[IdeaReport]:
         db = await self._ensure_db()
@@ -144,7 +168,7 @@ class SQLiteStorage(StorageBackend):
             rows = await cursor.fetchall()
             return [IdeaReport.model_validate_json(row[0]) for row in rows]
         finally:
-            await db.close()
+            await self._release_db(db)
 
     async def find_runs_by_content_hash(self, content_hash: str, exclude_id: str | None = None) -> list[dict]:
         """Find runs with the same content hash, optionally excluding one."""
@@ -163,7 +187,7 @@ class SQLiteStorage(StorageBackend):
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
         finally:
-            await db.close()
+            await self._release_db(db)
 
     async def find_runs_by_prefix(self, prefix: str) -> list[dict]:
         """Find all runs matching an ID prefix, ordered by most recent first."""
@@ -176,7 +200,7 @@ class SQLiteStorage(StorageBackend):
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
         finally:
-            await db.close()
+            await self._release_db(db)
 
     async def save_scrape_cache(self, batch_id: str, source: str, items: list[TrendingItem]) -> None:
         """Save scraped items to cache for later reuse."""
@@ -189,10 +213,16 @@ class SQLiteStorage(StorageBackend):
             )
             await db.commit()
         finally:
-            await db.close()
+            await self._release_db(db)
 
-    async def load_latest_scrape_cache(self) -> list[TrendingItem]:
-        """Load the most recent batch of cached scraped items."""
+    async def load_latest_scrape_cache(self, source_names: list[str] | None = None) -> list[TrendingItem]:
+        """Load the most recent batch of cached scraped items.
+
+        If ``source_names`` is provided, the batch must contain ALL of the
+        requested sources (case-insensitive).  If any source is missing the
+        method logs a warning and returns an empty list.  Pass ``None`` to
+        preserve the original behaviour (return every item in the latest batch).
+        """
         db = await self._ensure_db()
         try:
             cursor = await db.execute(
@@ -203,10 +233,41 @@ class SQLiteStorage(StorageBackend):
                 return []
 
             batch_id = row[0]
-            cursor = await db.execute(
-                "SELECT items_json FROM scrape_cache WHERE run_id = ?",
-                (batch_id,),
-            )
+
+            if source_names is not None:
+                # Normalise requested names to lower-case for comparison.
+                requested = {s.lower() for s in source_names}
+
+                # Find which sources are actually present in this batch.
+                cursor = await db.execute(
+                    "SELECT DISTINCT LOWER(source) FROM scrape_cache WHERE run_id = ?",
+                    (batch_id,),
+                )
+                present_rows = await cursor.fetchall()
+                present = {r[0] for r in present_rows}
+
+                missing = requested - present
+                if missing:
+                    logger.warning(
+                        "Cached batch %s is missing sources %s; "
+                        "ignoring cache to avoid source mismatch.",
+                        batch_id,
+                        sorted(missing),
+                    )
+                    return []
+
+                # All requested sources are present — fetch only those rows.
+                placeholders = ",".join("?" * len(requested))
+                cursor = await db.execute(
+                    f"SELECT items_json FROM scrape_cache WHERE run_id = ? AND LOWER(source) IN ({placeholders})",
+                    (batch_id, *sorted(requested)),
+                )
+            else:
+                cursor = await db.execute(
+                    "SELECT items_json FROM scrape_cache WHERE run_id = ?",
+                    (batch_id,),
+                )
+
             rows = await cursor.fetchall()
             items = []
             for row in rows:
@@ -215,7 +276,7 @@ class SQLiteStorage(StorageBackend):
                     items.append(TrendingItem.model_validate(raw))
             return items
         finally:
-            await db.close()
+            await self._release_db(db)
 
     async def delete_runs_older_than(self, days: int) -> int:
         """Delete runs older than N days. Returns count of deleted runs."""
@@ -233,4 +294,4 @@ class SQLiteStorage(StorageBackend):
             await db.commit()
             return count
         finally:
-            await db.close()
+            await self._release_db(db)

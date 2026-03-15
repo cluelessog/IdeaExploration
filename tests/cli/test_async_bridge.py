@@ -4,12 +4,13 @@ from __future__ import annotations
 import asyncio
 import signal
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
 from ideagen.cli.async_bridge import run_async
-from ideagen.core.models import CancellationToken
+from ideagen.core.models import CancellationToken, PipelineComplete
+from tests.conftest import make_run
 
 
 # ---------------------------------------------------------------------------
@@ -92,3 +93,88 @@ def test_run_async_with_token_on_non_win32() -> None:
     registered_signum = mock_loop.add_signal_handler.call_args[0][0]
     assert registered_signum == signal.SIGINT
     assert result == "done"
+
+
+# ---------------------------------------------------------------------------
+# Async generator cleanup tests (Audit Finding #3)
+# ---------------------------------------------------------------------------
+
+
+def test_run_async_calls_shutdown_asyncgens() -> None:
+    """run_async calls loop.shutdown_asyncgens() before loop.close() in the finally block."""
+    mock_loop = MagicMock()
+    mock_loop.run_until_complete.return_value = "ok"
+
+    async def simple():
+        return "ok"
+
+    with patch("asyncio.new_event_loop", return_value=mock_loop):
+        run_async(simple())
+
+    # shutdown_asyncgens must be called, and close must come after it
+    mock_loop.run_until_complete.assert_called()
+    calls = mock_loop.run_until_complete.call_args_list
+    # The last run_until_complete call (in finally) should be shutdown_asyncgens
+    assert len(calls) >= 2, "Expected at least 2 run_until_complete calls (coro + shutdown_asyncgens)"
+    mock_loop.close.assert_called_once()
+
+
+class _SpyAsyncGen:
+    """Wraps an async generator and tracks whether aclose() was called."""
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.aclose_called = False
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        return await self._inner.__anext__()
+
+    async def aclose(self):
+        self.aclose_called = True
+        return await self._inner.aclose()
+
+
+async def test_consume_pipeline_closes_generator_async() -> None:
+    """_consume_pipeline closes the generator after PipelineComplete is received."""
+    from ideagen.cli.commands.run import _consume_pipeline_for_test
+
+    async def gen():
+        yield PipelineComplete(result=make_run())
+
+    spy = _SpyAsyncGen(gen())
+    await _consume_pipeline_for_test(spy)
+
+    assert spy.aclose_called, "aclose() was not called after PipelineComplete"
+
+
+async def test_consume_pipeline_closes_on_early_return_async() -> None:
+    """_consume_pipeline closes the generator even if it ends without PipelineComplete."""
+    from ideagen.cli.commands.run import _consume_pipeline_for_test
+
+    async def gen():
+        yield object()  # not a PipelineComplete, just exhaust
+
+    spy = _SpyAsyncGen(gen())
+    result = await _consume_pipeline_for_test(spy)
+
+    assert result is None
+    assert spy.aclose_called, "aclose() was not called after generator exhaustion"
+
+
+async def test_consume_pipeline_closes_on_keyboard_interrupt_async() -> None:
+    """_consume_pipeline closes the generator on KeyboardInterrupt (Ctrl+C path)."""
+    from ideagen.cli.commands.run import _consume_pipeline_for_test
+
+    async def gen():
+        raise KeyboardInterrupt
+        yield  # make it an async generator
+
+    spy = _SpyAsyncGen(gen())
+
+    with pytest.raises(KeyboardInterrupt):
+        await _consume_pipeline_for_test(spy)
+
+    assert spy.aclose_called, "aclose() was not called after KeyboardInterrupt"

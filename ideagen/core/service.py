@@ -56,7 +56,9 @@ class IdeaGenService:
         if cached and self._storage:
             yield StageStarted(stage="collect", metadata={"mode": "cached"})
             start = time.monotonic()
-            all_items = await self._storage.load_latest_scrape_cache()
+            all_items = await self._storage.load_latest_scrape_cache(
+                source_names=list(self._sources.keys())
+            )
             if not all_items:
                 logger.warning("No cached data found. Run without --cached first.")
                 yield CacheEmptyWarning()

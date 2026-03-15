@@ -1,5 +1,7 @@
 from __future__ import annotations
 import asyncio
+import os
+import sys
 from collections.abc import AsyncIterator
 from rich.console import Console
 from rich.panel import Panel
@@ -14,6 +16,14 @@ from ideagen.core.models import (
 console = Console()
 
 
+def _get_spinner_column() -> SpinnerColumn:
+    """Return an ASCII-safe SpinnerColumn on non-UTF-8 terminals, default otherwise."""
+    encoding = getattr(sys.stdout, "encoding", None) or ""
+    if encoding.lower().startswith("cp") or encoding.lower() == "ascii":
+        return SpinnerColumn(spinner_name="line")
+    return SpinnerColumn()
+
+
 class PipelineEventRenderer:
     """Consumes AsyncIterator[PipelineEvent] and renders Rich progress."""
 
@@ -25,7 +35,7 @@ class PipelineEventRenderer:
         result = None
 
         with Progress(
-            SpinnerColumn(),
+            _get_spinner_column(),
             TextColumn("[progress.description]{task.description}"),
             TimeElapsedColumn(),
             console=self._console,

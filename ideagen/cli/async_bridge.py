@@ -26,4 +26,5 @@ def run_async(coro: Coroutine[Any, Any, Any], cancellation_token: CancellationTo
             cancellation_token.cancel()
         return None
     finally:
+        loop.run_until_complete(loop.shutdown_asyncgens())
         loop.close()
