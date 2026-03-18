@@ -47,7 +47,7 @@ complete (all planned phases delivered)
 | 10 | Robustness: duplicate detection, cache warning, prefix ambiguity, WSL | completed |
 | 11 | New Capabilities: output formats, source filters, compare, prompts | completed |
 | Audit | Code audit fixes: 17 findings (timeout, cache, async, validation, docs) | completed |
-| 11.5 | Web Dashboard (deferred) | not-started |
+| 11.5 | Web Dashboard: FastAPI + htmx + Pico CSS | completed |
 
 ## Task Breakdown
 
@@ -55,13 +55,17 @@ complete (all planned phases delivered)
 
 All planned work is delivered. 746 tests, 95%+ coverage. See `.omc/plans/MASTER-PLAN.md` for detailed per-phase breakdown.
 
-### Phase 11.5: Web Dashboard (Deferred)
-- [ ] FastAPI + htmx for browsing history, viewing ideas, triggering runs
-- Only to be considered if CLI-only workflow proves insufficient
+### Phase 11.5: Web Dashboard (Complete)
+- [x] FastAPI + htmx + Pico CSS web dashboard (`ideagen dashboard`)
+- [x] Run history with pagination, detail views with idea cards
+- [x] Pipeline trigger with real-time SSE streaming
+- [x] Run comparison (side-by-side) and idea search
+- [x] Config display (read-only), SQLite WAL mode
+- [x] 86 new tests, 92% coverage on ideagen/web/, 832 total passing
 
 ## Open Questions
 
-- Whether to add a web UI in a future iteration (Phase 11.5)
+None — all planned work is delivered.
 
 ## Dependencies
 
