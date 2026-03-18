@@ -78,9 +78,17 @@ def test_interactive_shows_welcome_banner(runner: CliRunner, mock_repl_deps: dic
 
 
 def test_interactive_unknown_command_shows_help(runner: CliRunner, mock_repl_deps: dict) -> None:
-    """Unknown command prints the help command list."""
+    """Unknown command triggers NL interpretation; on failure shows help."""
+    from ideagen.core.exceptions import ProviderError
+
     mock_repl_deps["prompt"].ask.side_effect = ["foobar", "quit"]
-    result = runner.invoke(app, ["interactive"])
+
+    mock_instance = MagicMock()
+    mock_instance.interpret = AsyncMock(side_effect=ProviderError("not available"))
+
+    with patch("ideagen.core.nl_interpreter.NLInterpreter", return_value=mock_instance):
+        result = runner.invoke(app, ["interactive"])
+
     assert result.exit_code == 0
     assert "generate" in result.output
 

@@ -96,6 +96,41 @@ def interactive_mode(
             console.print(f"[green]Exported to {path}[/green]")
 
         else:
-            console.print("Commands: [green]generate[/green], [green]list[/green], [green]detail <n>[/green], [green]export[/green], [green]quit[/green]")
+            # Try NL interpretation for unrecognized commands
+            _try_nl_interpret(cmd, console)
 
     console.print("[dim]Goodbye![/dim]")
+
+
+def _try_nl_interpret(user_input: str, console: Console) -> None:
+    """Attempt to interpret unrecognized input as natural language via NLInterpreter."""
+    from ideagen.cli.async_bridge import run_async
+    from ideagen.core.nl_interpreter import NLInterpreter
+    from ideagen.core.exceptions import ProviderError
+
+    try:
+        interpreter = NLInterpreter()
+        action = run_async(interpreter.interpret(user_input))
+    except ProviderError:
+        console.print(
+            "Commands: [green]generate[/green], [green]list[/green], "
+            "[green]detail <n>[/green], [green]export[/green], [green]quit[/green]\n"
+            "[dim]Tip: Install Claude CLI for natural language support.[/dim]"
+        )
+        return
+
+    if action is None:
+        console.print("Commands: [green]generate[/green], [green]list[/green], [green]detail <n>[/green], [green]export[/green], [green]quit[/green]")
+        return
+
+    console.print(f"\n[bold cyan]Interpreted:[/bold cyan] {action.explanation}")
+    console.print(f"[dim]Command: {action.command} | Confidence: {action.confidence:.0%}[/dim]")
+
+    if action.confidence < 0.7:
+        from rich.prompt import Confirm
+        if not Confirm.ask("Confidence is low. Proceed?", default=False):
+            console.print("[yellow]Cancelled.[/yellow]")
+            return
+
+    from ideagen.cli.commands.ask import _execute_action
+    _execute_action(action)

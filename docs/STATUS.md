@@ -55,3 +55,11 @@ None
 - **What was done**: Updated docs to match reality — all phases 1-11 + audit are complete (746 tests, 95%+ coverage). Fixed stale milestones and in-progress items.
 - **What's next**: Phase 11.5 (web dashboard) if needed, otherwise project is feature-complete
 - **Blockers**: none
+
+### [2026-03-16 14:00] — Add AI-powered natural language CLI layer
+- **Type**: feature
+- **Status**: completed
+- **Files changed**: ideagen/core/nl_interpreter.py, ideagen/cli/commands/ask.py, ideagen/cli/commands/interactive.py, ideagen/cli/app.py, tests/core/test_nl_interpreter.py, tests/cli/test_ask.py, tests/cli/test_interactive_nl.py, tests/cli/test_interactive.py
+- **What was done**: Built NL interpretation layer using Claude CLI subprocess. Added `ideagen ask "..."` command and NL fallback in interactive REPL. 31 new tests, 863 total passing.
+- **What's next**: Integration testing with live Claude CLI, potential prompt refinement based on real usage
+- **Blockers**: none
