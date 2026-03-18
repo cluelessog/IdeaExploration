@@ -290,6 +290,9 @@ class TestStorageBackendConcreteSubclass:
             async def find_runs_by_prefix(self, prefix: str) -> list[dict]:
                 return []
 
+            async def get_runs_count(self, **filters: Any) -> int:
+                return 0
+
         return ConcreteStorage
 
     def test_concrete_subclass_with_all_methods_instantiates(self):

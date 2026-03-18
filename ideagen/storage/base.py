@@ -31,3 +31,6 @@ class StorageBackend(ABC):
 
     @abstractmethod
     async def find_runs_by_prefix(self, prefix: str) -> list[dict]: ...
+
+    @abstractmethod
+    async def get_runs_count(self, **filters: Any) -> int: ...

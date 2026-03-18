@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block title %}Search Ideas - IdeaGen{% endblock %}
+
+{% block content %}
+<h1>Search Ideas</h1>
+
+<form method="get" action="/search">
+    <div class="grid">
+        <input type="search" name="q" value="{{ query }}" placeholder="Search ideas..." autofocus>
+        <button type="submit">Search</button>
+    </div>
+</form>
+
+{% if message %}
+<p>{{ message }}</p>
+{% endif %}
+
+{% if ideas %}
+<p>Found {{ ideas|length }} result(s) for "{{ query }}"</p>
+<div class="grid">
+    {% for report in ideas %}
+    <article class="idea-card">
+        <header>
+            <strong>{{ report.idea.title }}</strong>
+            <span class="wtp-badge">WTP: {{ "%.1f"|format(report.wtp_score) }}</span>
+        </header>
+        <p><strong>Problem:</strong> {{ report.idea.problem_statement }}</p>
+        <p><strong>Solution:</strong> {{ report.idea.solution }}</p>
+        <footer>
+            <small>{{ report.market_analysis.target_audience }} | {{ report.monetization.revenue_model }}</small>
+        </footer>
+    </article>
+    {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

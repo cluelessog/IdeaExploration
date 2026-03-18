@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Run Detail - IdeaGen{% endblock %}
+
+{% block content %}
+{% if error %}
+<article>
+    <header>Error</header>
+    <p>{{ error }}</p>
+    <a href="/runs">Back to runs</a>
+</article>
+{% else %}
+<hgroup>
+    <h1>Run {{ run.id[:12] }}...</h1>
+    <p>{{ run.domain }} | {{ run.timestamp }} | {{ run.ideas_count }} ideas | {{ run.total_items_scraped }} items scraped</p>
+</hgroup>
+
+<a href="/runs">Back to runs</a>
+
+{% if ideas %}
+<div class="grid">
+    {% for report in ideas %}
+    <article class="idea-card">
+        <header>
+            <strong>{{ report.idea.title }}</strong>
+            <span class="wtp-badge">WTP: {{ "%.1f"|format(report.wtp_score) }}</span>
+        </header>
+        <p><strong>Problem:</strong> {{ report.idea.problem_statement }}</p>
+        <p><strong>Solution:</strong> {{ report.idea.solution }}</p>
+        <p><strong>Novelty:</strong> {{ "%.1f"|format(report.idea.novelty_score) }}/10</p>
+        <footer>
+            <small>{{ report.market_analysis.target_audience }} | {{ report.monetization.revenue_model }}</small>
+        </footer>
+    </article>
+    {% endfor %}
+</div>
+{% else %}
+<p>No ideas in this run.</p>
+{% endif %}
+{% endif %}
+{% endblock %}

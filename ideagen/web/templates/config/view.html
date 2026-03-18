@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}Configuration - IdeaGen{% endblock %}
+
+{% block content %}
+<h1>Configuration</h1>
+<p><em>Read-only view of current settings.</em></p>
+
+<article>
+    <header>Provider</header>
+    <table>
+        <tr><td>Default provider</td><td>{{ config.providers.default }}</td></tr>
+        <tr><td>Model override</td><td>{{ config.providers.model or "none" }}</td></tr>
+    </table>
+</article>
+
+<article>
+    <header>Sources</header>
+    <table>
+        <tr><td>Enabled sources</td><td>{{ config.sources.enabled | join(", ") }}</td></tr>
+        <tr><td>Scrape delay</td><td>{{ config.sources.scrape_delay }}s</td></tr>
+        <tr><td>Reddit subreddits</td><td>{{ config.sources.reddit_subreddits | join(", ") }}</td></tr>
+    </table>
+</article>
+
+<article>
+    <header>Storage</header>
+    <table>
+        <tr><td>Database path</td><td>{{ config.storage.database_path }}</td></tr>
+        <tr><td>Output directory</td><td>{{ config.storage.output_dir }}</td></tr>
+    </table>
+</article>
+
+<article>
+    <header>Generation</header>
+    <table>
+        <tr><td>Ideas per run</td><td>{{ config.generation.ideas_per_run }}</td></tr>
+        <tr><td>Domain</td><td>{{ config.generation.domain }}</td></tr>
+        <tr><td>Dedup threshold</td><td>{{ config.generation.dedup_threshold }}</td></tr>
+    </table>
+</article>
+{% endblock %}

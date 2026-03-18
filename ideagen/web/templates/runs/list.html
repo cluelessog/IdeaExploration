@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}Runs - IdeaGen{% endblock %}
+
+{% block content %}
+<h1>Run History</h1>
+
+{% if runs %}
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Domain</th>
+            <th>Ideas</th>
+            <th>Items Scraped</th>
+            <th>Sources</th>
+            <th>Timestamp</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for run in runs %}
+        <tr>
+            <td><a href="/runs/{{ run.id }}">{{ run.id[:12] }}...</a></td>
+            <td>{{ run.domain }}</td>
+            <td>{{ run.ideas_count }}</td>
+            <td>{{ run.total_items_scraped }}</td>
+            <td>{{ run.sources_used }}</td>
+            <td>{{ run.timestamp }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<nav>
+    <ul>
+        {% if page > 1 %}
+        <li><a href="/runs?page={{ page - 1 }}">Previous</a></li>
+        {% endif %}
+        <li>Page {{ page }} of {{ total_pages }}</li>
+        {% if page < total_pages %}
+        <li><a href="/runs?page={{ page + 1 }}">Next</a></li>
+        {% endif %}
+    </ul>
+</nav>
+{% elif total == 0 %}
+<p>No runs yet. <a href="/pipeline/new">Start a new pipeline run</a> to generate ideas.</p>
+{% else %}
+<p>No runs on this page.</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,12 @@
+<article class="idea-card">
+    <header>
+        <strong>{{ report.idea.title }}</strong>
+        <span class="wtp-badge">WTP: {{ "%.1f"|format(report.wtp_score) }}</span>
+    </header>
+    <p><strong>Problem:</strong> {{ report.idea.problem_statement }}</p>
+    <p><strong>Solution:</strong> {{ report.idea.solution }}</p>
+    <p><strong>Novelty:</strong> {{ "%.1f"|format(report.idea.novelty_score) }}/10</p>
+    <footer>
+        <small>{{ report.market_analysis.target_audience }} | {{ report.monetization.revenue_model }}</small>
+    </footer>
+</article>

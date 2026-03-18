@@ -41,6 +41,7 @@ from ideagen.cli.commands.interactive import interactive_app
 from ideagen.cli.commands.schedule import schedule_app
 from ideagen.cli.commands.compare import compare_app
 from ideagen.cli.commands.prompts import prompts_app
+from ideagen.cli.commands.dashboard import dashboard_app
 
 app.add_typer(run_app, name="run")
 app.add_typer(sources_app, name="sources")
@@ -50,6 +51,7 @@ app.add_typer(interactive_app, name="interactive")
 app.add_typer(schedule_app, name="schedule")
 app.add_typer(compare_app, name="compare")
 app.add_typer(prompts_app, name="prompts")
+app.add_typer(dashboard_app, name="dashboard")
 
 
 def main() -> None:

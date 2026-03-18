@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}IdeaGen Dashboard{% endblock %}
+
+{% block content %}
+<hgroup>
+    <h1>IdeaGen Dashboard</h1>
+    <p>Browse generated ideas, trigger pipelines, and compare runs.</p>
+</hgroup>
+
+<div class="grid">
+    <article>
+        <header>Run History</header>
+        <p>Browse past pipeline runs and their generated ideas.</p>
+        <a href="/runs" role="button">View Runs</a>
+    </article>
+    <article>
+        <header>New Run</header>
+        <p>Trigger a new idea generation pipeline with real-time progress.</p>
+        <a href="/pipeline/new" role="button">Start Pipeline</a>
+    </article>
+    <article>
+        <header>Compare</header>
+        <p>Compare two runs side-by-side to see what changed.</p>
+        <a href="/compare" role="button">Compare Runs</a>
+    </article>
+</div>
+{% endblock %}

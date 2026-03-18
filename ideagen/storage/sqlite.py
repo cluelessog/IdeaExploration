@@ -39,6 +39,9 @@ class SQLiteStorage(StorageBackend):
             db.row_factory = aiosqlite.Row
 
         if not self._initialized:
+            # Enable WAL mode for concurrent read safety (file-backed DBs only)
+            if not self._is_memory:
+                await db.execute("PRAGMA journal_mode=WAL")
             await db.executescript(CREATE_TABLES)
             # Check/set schema version
             cursor = await db.execute("SELECT version FROM schema_version LIMIT 1")
@@ -199,6 +202,16 @@ class SQLiteStorage(StorageBackend):
             )
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
+        finally:
+            await self._release_db(db)
+
+    async def get_runs_count(self, **filters: Any) -> int:
+        """Return the total number of runs."""
+        db = await self._ensure_db()
+        try:
+            cursor = await db.execute("SELECT COUNT(*) FROM runs")
+            row = await cursor.fetchone()
+            return row[0]
         finally:
             await self._release_db(db)
 

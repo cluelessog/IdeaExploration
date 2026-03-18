@@ -140,6 +140,9 @@ class MockStorage(StorageBackend):
     async def find_runs_by_prefix(self, prefix: str) -> list[dict]:
         return []
 
+    async def get_runs_count(self, **filters) -> int:
+        return 0
+
 
 # ---------------------------------------------------------------------------
 # Fixture helpers

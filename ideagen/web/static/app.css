@@ -1,0 +1,50 @@
+/* IdeaGen Dashboard custom styles */
+
+.idea-card header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.wtp-badge {
+    background: var(--pico-primary-background);
+    color: var(--pico-primary-inverse);
+    padding: 0.2rem 0.6rem;
+    border-radius: 1rem;
+    font-size: 0.85rem;
+    white-space: nowrap;
+}
+
+.stage-event {
+    padding: 0.4rem 0;
+    border-bottom: 1px solid var(--pico-muted-border-color);
+}
+
+.stage-event[data-event-type="stage_completed"] {
+    color: var(--pico-ins-color);
+}
+
+.stage-event[data-event-type="error"] {
+    color: var(--pico-del-color);
+}
+
+.stage-icon {
+    display: inline-block;
+    width: 1.5rem;
+    text-align: center;
+}
+
+.compare-added {
+    color: var(--pico-ins-color);
+}
+
+.compare-removed {
+    color: var(--pico-del-color);
+}
+
+footer {
+    margin-top: 2rem;
+    padding: 1rem 0;
+    text-align: center;
+    color: var(--pico-muted-color);
+}

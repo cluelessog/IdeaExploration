@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}Comparison Result - IdeaGen{% endblock %}
+
+{% block content %}
+<h1>Comparison Result</h1>
+
+{% if error %}
+<article>
+    <header>Error</header>
+    <p>{{ error }}</p>
+    <a href="/compare">Back to compare</a>
+</article>
+{% elif result %}
+<p>
+    <strong>Run A:</strong> {{ run_a.id[:12] }}... ({{ run_a.domain }})
+    &harr;
+    <strong>Run B:</strong> {{ run_b.id[:12] }}... ({{ run_b.domain }})
+</p>
+
+<a href="/compare">Compare different runs</a>
+
+{% if result.added %}
+<h2>Added (in Run B only)</h2>
+<ul>
+    {% for title in result.added %}
+    <li class="compare-added">{{ title }}</li>
+    {% endfor %}
+</ul>
+{% endif %}
+
+{% if result.removed %}
+<h2>Removed (in Run A only)</h2>
+<ul>
+    {% for title in result.removed %}
+    <li class="compare-removed">{{ title }}</li>
+    {% endfor %}
+</ul>
+{% endif %}
+
+{% if result.common %}
+<h2>Common</h2>
+<ul>
+    {% for ta, tb in result.common %}
+    <li>{% if ta == tb %}{{ ta }}{% else %}{{ ta }} &rarr; {{ tb }}{% endif %}</li>
+    {% endfor %}
+</ul>
+{% endif %}
+
+{% if result.score_changes %}
+<h2>Score Changes</h2>
+<table>
+    <thead>
+        <tr><th>Idea</th><th>Score A</th><th>Score B</th><th>Change</th></tr>
+    </thead>
+    <tbody>
+        {% for sc in result.score_changes %}
+        <tr>
+            <td>{{ sc.title_b }}</td>
+            <td>{{ "%.1f"|format(sc.score_a) }}</td>
+            <td>{{ "%.1f"|format(sc.score_b) }}</td>
+            <td class="{% if sc.score_b > sc.score_a %}compare-added{% else %}compare-removed{% endif %}">
+                {% if sc.score_b > sc.score_a %}+{% endif %}{{ "%.1f"|format(sc.score_b - sc.score_a) }}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+{% if not result.added and not result.removed and not result.score_changes %}
+<p>Runs are identical.</p>
+{% endif %}
+
+{% endif %}
+{% endblock %}

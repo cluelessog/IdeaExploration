@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+
+{% block title %}New Pipeline Run - IdeaGen{% endblock %}
+
+{% block content %}
+<h1>Start New Pipeline Run</h1>
+
+<form method="post" action="/pipeline/start">
+    <label for="domain">Domain</label>
+    <select id="domain" name="domain" required>
+        {% for d in domains %}
+        <option value="{{ d }}">{{ d }}</option>
+        {% endfor %}
+    </select>
+
+    <button type="submit">Start Pipeline</button>
+</form>
+{% endblock %}

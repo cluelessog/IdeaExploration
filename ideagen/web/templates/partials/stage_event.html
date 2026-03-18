@@ -1,0 +1,10 @@
+<div class="stage-event" data-event-type="{{ event_type }}">
+    <span class="stage-icon">
+        {% if event_type == "stage_started" %}&#9654;
+        {% elif event_type == "stage_completed" %}&#10004;
+        {% elif event_type == "error" %}&#10060;
+        {% else %}&#8226;
+        {% endif %}
+    </span>
+    <span class="stage-text">{{ message }}</span>
+</div>

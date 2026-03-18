@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}Compare Runs - IdeaGen{% endblock %}
+
+{% block content %}
+<h1>Compare Runs</h1>
+
+{% if runs %}
+<form method="get" action="/compare/result">
+    <div class="grid">
+        <div>
+            <label for="run_a">Run A</label>
+            <select id="run_a" name="run_a" required>
+                <option value="">Select run...</option>
+                {% for run in runs %}
+                <option value="{{ run.id }}">{{ run.id[:12] }}... ({{ run.domain }}, {{ run.timestamp }})</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="run_b">Run B</label>
+            <select id="run_b" name="run_b" required>
+                <option value="">Select run...</option>
+                {% for run in runs %}
+                <option value="{{ run.id }}">{{ run.id[:12] }}... ({{ run.domain }}, {{ run.timestamp }})</option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+    <button type="submit">Compare</button>
+</form>
+{% else %}
+<p>No runs available to compare. <a href="/pipeline/new">Start a pipeline run</a> first.</p>
+{% endif %}
+{% endblock %}
