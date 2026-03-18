@@ -43,8 +43,8 @@ class RunTask:
         """Append an event to the replay buffer and signal waiting clients."""
         event_data["id"] = len(self.events)
         self.events.append(event_data)
+        # Set signal so waiting SSE clients wake up; they will clear it after reading
         self.event_signal.set()
-        self.event_signal.clear()
 
     def mark_completed(self, status: RunStatus = RunStatus.COMPLETED) -> None:
         self.status = status

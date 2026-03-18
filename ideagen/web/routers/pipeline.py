@@ -127,36 +127,31 @@ async def cancel_pipeline(request: Request, task_id: str):
 async def _sse_generator(run_task: RunTask, last_id: int):
     """Generate SSE events from the run task's replay buffer."""
     cursor = last_id + 1
+    keepalive_interval = 15.0  # seconds
 
     while True:
         # Replay any buffered events from cursor onward
+        sent_any = False
         while cursor < len(run_task.events):
             event = run_task.events[cursor]
             yield _format_sse(event)
             cursor += 1
+            sent_any = True
 
         # If the task is done and we've replayed everything, send done and stop
         if run_task.status in (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED):
             break
 
-        # Wait for new events
-        try:
-            await asyncio.wait_for(
-                _wait_for_event(run_task),
-                timeout=30.0,
-            )
-        except asyncio.TimeoutError:
-            # Send keepalive comment
-            yield ": keepalive\n\n"
-
-
-async def _wait_for_event(run_task: RunTask) -> None:
-    """Wait until a new event is signaled."""
-    initial_count = len(run_task.events)
-    while len(run_task.events) == initial_count:
-        if run_task.status in (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED):
-            return
-        await asyncio.sleep(0.05)
+        # Wait for new events using polling (avoids asyncio.Event race conditions)
+        elapsed = 0.0
+        while cursor >= len(run_task.events):
+            if run_task.status in (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED):
+                break
+            await asyncio.sleep(0.1)
+            elapsed += 0.1
+            if elapsed >= keepalive_interval:
+                yield ": keepalive\n\n"
+                elapsed = 0.0
 
 
 def _format_sse(event: dict) -> str:
@@ -197,6 +192,8 @@ async def _run_pipeline(run_task: RunTask) -> None:
         async for event in service.run(domain=domain):
             event_data = _pipeline_event_to_dict(event)
             run_task.append_event(event_data)
+            # Small yield to allow SSE to flush
+            await asyncio.sleep(0)
 
         run_task.append_event({"event": "done", "data": {"status": "completed"}})
         run_task.mark_completed(RunStatus.COMPLETED)
